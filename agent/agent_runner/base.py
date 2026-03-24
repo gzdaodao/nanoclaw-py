@@ -13,6 +13,7 @@ import uuid
 # Import from models to avoid circular import
 from .models import AgentMessage, AgentResponse
 from .database import ConversationDatabase, get_default_database, init_default_database
+from .logger import logger
 
 
 @dataclass
@@ -130,7 +131,7 @@ class Agent(ABC):
             self.history = messages
         except Exception as e:
             # Log error but don't crash
-            print(f"Warning: Failed to load history from database: {e}")
+            logger.debug(f"Warning: Failed to load history from database: {e}")
     
     @property
     def is_running(self) -> bool:
@@ -190,12 +191,13 @@ class Agent(ABC):
         self.history.append(message)
         self._last_activity = datetime.now()
         
+        logger.debug(f"persist_history: {self.persist_history}, session_id: {self.context.session_id}, db: {self.context.db}")
         # Persist to database
         if self.persist_history and self.context.session_id and self.context.db:
             try:
                 self.context.db.save_message(self.context.session_id, message)
             except Exception as e:
-                print(f"Warning: Failed to save message to database: {e}")
+                logger.debug(f"Warning: Failed to save message to database: {e}")
         
         # Trim history if needed
         if len(self.history) > self.max_history:
@@ -225,7 +227,7 @@ class Agent(ABC):
                     role=None if not keep_system else "system"
                 )
             except Exception as e:
-                print(f"Warning: Failed to delete messages from database: {e}")
+                logger.debug(f"Warning: Failed to delete messages from database: {e}")
         
         if keep_system:
             self.history = [m for m in self.history if m.role == "system"]
@@ -255,7 +257,7 @@ class Agent(ABC):
             # Save all messages
             self.context.db.save_messages(self.context.session_id, self.history)
         except Exception as e:
-            print(f"Warning: Failed to sync history to database: {e}")
+            logger.debug(f"Warning: Failed to sync history to database: {e}")
     
     async def get_session_stats(self) -> Dict[str, Any]:
         """Get statistics for current session"""
