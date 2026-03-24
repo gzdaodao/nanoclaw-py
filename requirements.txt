@@ -10,3 +10,4 @@ python-telegram-bot>=20.0
 pyyaml>=6.0
 loguru
 aioxmlrpc
+markdown

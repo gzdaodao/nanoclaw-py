@@ -166,12 +166,12 @@ class OpenAIAgent(Agent):
                
         # Build system prompt
         self.system_prompt = self._build_system_prompt()
-        
-        # Add system message to history
-        self.add_to_history(AgentMessage(
-            role="system",
-            content=self.system_prompt
-        ))
+        if not any(msg.role == "system" for msg in self.history):
+            # Add system message to history
+            self.add_to_history(AgentMessage(
+                role="system",
+                content=self.system_prompt
+            ))
         
         await super().initialize()
         

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List, Callable
 from loguru import logger
 from aioxmlrpc.client import ServerProxy
+import markdown
 
 from .base import Channel, InboundMessage
 from .. import config
@@ -171,6 +172,10 @@ class OdooChannel(Channel):
             await self._rate_limit()
             
             try:
+                text = markdown.markdown(
+                        text,
+                        extensions=['fenced_code', 'tables', 'codehilite']
+                        )
                 # Parse JID: odoo:{model}:{id}
                 parts = jid.split(':')
                 if len(parts) != 3:

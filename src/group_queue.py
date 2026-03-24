@@ -173,12 +173,18 @@ class GroupQueue:
     def send_message(self, group_jid: str, text: str) -> bool:
         """Send follow-up message to active container via IPC file"""
         state = self._get_group(group_jid)
-        if not state.active or not state.group_folder or state.is_task_container:
-            return False
         
-        state.idle_waiting = False
-        return self.input_writer.send_message(state.group_folder, text, group_jid)
-    
+        # 检查是否有激活容器
+        if state.active and state.group_folder and not state.is_task_container:
+            # 容器激活，立即发送
+            state.idle_waiting = False
+            success = self.input_writer.send_message(state.group_folder, text, group_jid)
+            if success:
+                logger.debug(f"Message sent to active container for {group_jid}")
+            return success
+        
+        return False
+        
     def _close_stdin(self, group_jid: str) -> None:
         """Signal active container to wind down"""
         state = self._get_group(group_jid)
