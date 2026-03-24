@@ -407,7 +407,7 @@ class OdooChannel(Channel):
                 'mail.channel',
                 'search_read',
                 [[
-                    ['channel_type', 'in', ['channel', 'group']],
+                    ['channel_type', 'in', ['channel', 'group', 'chat']],
                     ['message_ids', '!=', False]
                 ]],
                 {
@@ -419,6 +419,7 @@ class OdooChannel(Channel):
             for channel in channels:
                 channel_id = channel['id']
                 channel_name = channel.get('name', f'Channel {channel_id}')
+                channel_type = channel['channel_type']
                 
                 # Get last message ID for this channel
                 last_id = self._last_message_ids.get(f'mail.channel:{channel_id}', 0)
@@ -431,7 +432,7 @@ class OdooChannel(Channel):
                     if new_ids:
                         # Limit to last 10 new messages to prevent overload
                         new_ids = new_ids[-10:]
-                        await self._process_channel_messages(channel_id, channel_name, new_ids)
+                        await self._process_channel_messages(channel_id, channel_name, channel_type, new_ids)
                         
         except Exception as e:
             logger.error(f"Error checking channels: {e}")
@@ -513,7 +514,8 @@ class OdooChannel(Channel):
                     ['partner_ids', 'in', [self.partner_id]] if self.partner_id else [],
                     ['message_type', '=', 'comment'],
                     ['author_id', '!=', self.partner_id] if self.partner_id else [],
-                    ['id', '>', self._last_message_ids.get('mentions', 0)]
+                    ['id', '>', self._last_message_ids.get('mentions', 0)],
+                    ['model', '!=', 'mail.channel']
                 ]],
                 {
                     'fields': ['id', 'subject', 'body', 'author_id', 'model', 'res_id', 'date'],
@@ -561,7 +563,7 @@ class OdooChannel(Channel):
         except Exception as e:
             logger.error(f"Error checking mentions: {e}")
 
-    async def _process_channel_messages(self, channel_id: int, channel_name: str, message_ids: List[int]) -> None:
+    async def _process_channel_messages(self, channel_id: int, channel_name: str, channel_type: str, message_ids: List[int]) -> None:
         """Process messages from a channel."""
         try:
             # Get message details
@@ -588,6 +590,10 @@ class OdooChannel(Channel):
                 if msg.get('message_type') != 'comment':
                     continue
                 
+                is_from_me=(author_id == self.partner_id)
+                if is_from_me:
+                    continue
+                
                 # Create message
                 message = InboundMessage(
                     id=f"mail.message:{msg_id}",
@@ -597,8 +603,9 @@ class OdooChannel(Channel):
                     sender_name=author_name,
                     content=body,
                     timestamp=datetime.fromisoformat(msg['date'].replace('Z', '+00:00')),
-                    is_from_me=(author_id == self.partner_id),
-                    is_group=True,
+                    is_from_me=is_from_me,
+                    #is_bot_message=(author_id == self.partner_id),
+                    is_group=False if channel_type == 'chat' else True,
                     raw_data=msg
                 )
                 
@@ -633,7 +640,11 @@ class OdooChannel(Channel):
                 author_info = msg.get('author_id', [0, ''])
                 author_id = author_info[0] if isinstance(author_info, list) else 0
                 author_name = author_info[1] if isinstance(author_info, list) and len(author_info) > 1 else 'Unknown'
-                
+                 
+                is_from_me=(author_id == self.partner_id)
+                if is_from_me:
+                    continue
+
                 # Create message
                 message = InboundMessage(
                     id=f"mail.message:{msg_id}",
@@ -643,7 +654,8 @@ class OdooChannel(Channel):
                     sender_name=author_name,
                     content=body,
                     timestamp=datetime.fromisoformat(msg['date'].replace('Z', '+00:00')),
-                    is_from_me=(author_id == self.partner_id),
+                    is_from_me=is_from_me,
+                    #is_bot_message=(author_id == self.partner_id),
                     is_group=False,
                     raw_data=msg
                 )
@@ -686,20 +698,33 @@ class OdooChannel(Channel):
         """Send private message to a partner."""
         try:
             # Create or get conversation
+            #message_id = await self.models.execute_kw(
+            #    self.database,
+            #    self.uid,
+            #    self.password,
+            #    'mail.message',
+            #    'create',
+            #    [{
+            #        'body': text,
+            #        'partner_ids': [(4, partner_id)],
+            #        'message_type': 'comment',
+            #        #'subtype_xmlid': 'mail.mt_comment',
+            #        'model': 'res.partner',
+            #        'res_id': partner_id
+            #    }]
+            #)
             message_id = await self.models.execute_kw(
                 self.database,
                 self.uid,
                 self.password,
-                'mail.message',
-                'create',
-                [{
+                'res.partner',
+                'message_post',
+                [partner_id],
+                {
                     'body': text,
-                    'partner_ids': [(4, partner_id)],
                     'message_type': 'comment',
-                    'subtype_xmlid': 'mail.mt_comment',
-                    'model': 'res.partner',
-                    'res_id': partner_id
-                }]
+                    'subtype_xmlid': 'mail.mt_comment'
+                }
             )
             
             logger.debug(f"Private message sent to partner {partner_id}, ID: {message_id}")
