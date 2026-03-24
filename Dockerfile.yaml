@@ -1,0 +1,46 @@
+# Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装 Docker CLI（只需要客户端，不需要守护进程）
+RUN apt-get update && apt-get install -y \
+    docker.io \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+
+# 安装 Playwright 依赖
+RUN pip install playwright && \
+    playwright install chromium && \
+    playwright install-deps
+
+# 复制依赖文件
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 复制应用代码
+COPY src/ ./nanoclaw/
+
+# 创建必要目录
+RUN mkdir -p /app/store /app/data /app/groups
+
+# 环境变量配置（这些可以在运行时覆盖）
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -c "import sqlite3; sqlite3.connect('/app/data/nanoclaw.db')" || exit 1
+
+# 卷挂载点
+VOLUME ["/app/data", "/app/store", "/app/groups"]
+
+# 启动命令
+CMD ["python", "-m", "nanoclaw.main"]

@@ -1,0 +1,56 @@
+# Nanoclaw Agent Container (Python Version) - Enhanced
+# This container runs AI Agent SDK in isolation with Python and additional tools
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies including debugging tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    gcc \
+    g++ \
+    vim \
+    nano \
+    htop \
+    procps \
+    net-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Python requirements
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install additional Python packages for development
+RUN pip install --no-cache-dir \
+    ipython \
+    pytest \
+    black \
+    flake8
+
+# 复制代码
+COPY agent_runner/ ./agent_runner/
+
+# 创建必要目录
+RUN mkdir -p /workspace/group /workspace/ipc/input /workspace/ipc/messages
+
+
+# Set up volume mount points
+
+# Environment variables with defaults
+ENV GROUP_FOLDER=main \
+    IS_MAIN=0 \
+    MAX_TOKENS=8192 \
+    TEMPERATURE=0.7 \
+    LOG_LEVEL=DEBUG
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import sys; sys.exit(0)" || exit 1
+
+# Entry point
+ENTRYPOINT ["python", "-m", "agent_runner.main"]
+CMD []

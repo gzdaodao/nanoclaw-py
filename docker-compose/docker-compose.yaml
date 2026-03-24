@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  nanoclaw:
+    image: nanoclaw:latest
+    hostname: nanoclaw
+    restart: ${RESTART_MODE}
+    container_name: nanoclaw
+    volumes:
+      # 关键：挂载 Docker 套接字
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      # 持久化数据
+      - ${VOLUMES_ROOT_PATH}/app/data:/app/data
+      - ${VOLUMES_ROOT_PATH}/app/store:/app/store
+      - ${VOLUMES_ROOT_PATH}/app/groups:/app/groups
+    environment:
+      - ASSISTANT_NAME=Andy
+      - ASSISTANT_HAS_OWN_NUMBER=false
+      - LOG_LEVEL=info
+      - TIMEZONE=UTC
+      - ODOO_ENABLED=true
+      - WHATSAPP_ENABLED=false
+      - TELEGRAM_ENABLED=false
+      - SIGNAL_ENABLED=false
+      - DISCORD_ENABLED=false
+      - SLACK_ENABLED=false
+      - ODOO_URL=http://you-odoo-host
+      - ODOO_DATABASE=odoo-db
+      - ODOO_USERNAME=odoo-user-name
+      - ODOO_PASSWORD=odoo-user-password
+      - ODOO_POLL_INTERVAL=5000
+      - ODOO_MONITOR_MODELS=mail.channel,res.partner
+      - ODOO_INCLUDE_MENTIONS=true
+      - ODOO_AUTO_MARK_READ=true
+      - WHATSAPP_SESSION_DIR=/app/store/whatsapp-session
+      - WHATSAPP_HEADLESS=true
+      - TELEGRAM_BOT_TOKEN=your_bot_token_here
+      - SIGNAL_PHONE_NUMBER=+1234567890
+      - SIGNAL_CLI_PATH=/usr/local/bin/signal-cli
+      - DISCORD_BOT_TOKEN=your_discord_token
+      - SLACK_APP_TOKEN=xapp-your-app-token
+      - SLACK_BOT_TOKEN=xoxb-your-bot-token
+      - DATABASE_TYPE=sqlite
+      - SQLITE_PATH=/app/store/nanoclaw.db
+      - CONTAINER_IMAGE=nanoclaw-agent:latest
+      - CONTAINER_TIMEOUT=1800000
+      - MAX_CONCURRENT_CONTAINERS=5
+      - OPENAI_API_KEY=your-openai-key
+      - OPENAI_BASE_URL=you-base-url
+      - OPENAI_MODEL=you-model
+
+
+
+    # 显示界面（如果需要扫码）
+    # 在 headless=false 时需要 X11 转发
+    # environment:
+    #   - DISPLAY=${DISPLAY}
+    # volumes:
+    #   - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    
+    # 需要以 root 运行才能访问 docker.sock
+    user: root
+
+    networks:
+      - nanoclaw_network
+
+
+networks:
+  nanoclaw_network:
+    driver: bridge
+
+

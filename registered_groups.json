@@ -1,0 +1,8 @@
+{
+    "type": "register_group",
+    "jid": "odoo:mail.channel:60",
+    "name": "andy,admin",
+    "folder": "andy_admin_60",
+    "trigger": "@andy",
+    "requiresTrigger": false
+}
