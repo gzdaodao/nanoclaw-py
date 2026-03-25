@@ -51,7 +51,7 @@ ASSISTANT_NAME = os.getenv('ASSISTANT_NAME', 'Andy')
 ASSISTANT_HAS_OWN_NUMBER = str_to_bool(os.getenv('ASSISTANT_HAS_OWN_NUMBER'))
 
 # Polling intervals (in milliseconds)
-POLL_INTERVAL = str_to_int(os.getenv('POLL_INTERVAL'), 2000)
+POLL_INTERVAL = str_to_int(os.getenv('POLL_INTERVAL'), 1000)
 SCHEDULER_POLL_INTERVAL = str_to_int(os.getenv('SCHEDULER_POLL_INTERVAL'), 60000)
 IPC_POLL_INTERVAL = str_to_int(os.getenv('IPC_POLL_INTERVAL'), 1000)
 
@@ -139,7 +139,7 @@ ODOO_SESSION_DIR = Path(os.getenv(
 ))
 
 # Odoo polling interval (milliseconds)
-ODOO_POLL_INTERVAL = str_to_int(os.getenv('ODOO_POLL_INTERVAL'), 5000)
+ODOO_POLL_INTERVAL = str_to_int(os.getenv('ODOO_POLL_INTERVAL'), 1000)
 
 # Odoo message limit
 ODOO_MESSAGE_LIMIT = str_to_int(os.getenv('ODOO_MESSAGE_LIMIT'), 4096)

@@ -595,6 +595,7 @@ class NanoClawApplication:
                                     for m in group_msgs
                                 )
                                 if not has_trigger:
+                                    self.last_agent_timestamp[chat_id] = group_msgs[-1].timestamp
                                     continue
                             
                            

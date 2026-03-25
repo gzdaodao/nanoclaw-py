@@ -69,7 +69,7 @@ class OpenAIAgent(Agent):
         self.max_tokens = max_tokens
         self.custom_system_prompt = system_prompt
         self.tool_categories = tool_categories or [
-            "general", "filesystem", "communication", "system", "skills"
+            "general", "filesystem", "communication", "system", "skills", ""
         ]
         self.request_timeout = request_timeout
         self.max_retries = max_retries
@@ -143,6 +143,7 @@ class OpenAIAgent(Agent):
                 "filesystem:read", "filesystem:write",
                 "communication:send", "communication:read",
                 "memory:read", "memory:write", "system:execute",
+                "browser",
             ]
         )
     
@@ -166,12 +167,12 @@ class OpenAIAgent(Agent):
                
         # Build system prompt
         self.system_prompt = self._build_system_prompt()
-        if not any(msg.role == "system" for msg in self.history):
-            # Add system message to history
-            self.add_to_history(AgentMessage(
-                role="system",
-                content=self.system_prompt
-            ))
+        #if not any(msg.role == "system" for msg in self.history):
+        #    # Add system message to history
+        #    self.add_to_history(AgentMessage(
+        #        role="system",
+        #        content=self.system_prompt
+        #    ))
         
         await super().initialize()
         
@@ -219,6 +220,7 @@ Main group: {self.context.is_main}
 3. Provide skill details when users want to learn more
 4. Use other tools when appropriate
 5. Keep responses clear and helpful
+6. When a tool result returns an error, check whether there is an issue with the tool call parameters. If there is an issue, correct it and call the tool again. If a tool fails multiple times and the issue cannot be resolved, stop calling that tool or use an alternative tool. If neither approach works, stop all tool calls and return the error message for me to resolve.
 
 ## WORKFLOW
 When given a task:
@@ -241,7 +243,7 @@ When given a task:
     
     def _build_messages(self, new_messages: List[str]) -> List[Dict[str, Any]]:
         """Build messages for OpenAI API"""
-        messages = []
+        messages = [{"role": "system", "content":self.system_prompt}]
         
         # Add conversation history
         for msg in self.get_recent_history(self.max_history):
@@ -405,11 +407,18 @@ When given a task:
         message = choice.message
         content = message.content or ""
         tool_results = []
+        todos = []
+        logger.debug(f'content:{content}')
         
         # Handle tool calls
         if message.tool_calls:
-            for tool_call in message.tool_calls:
+            todos.append(message.tool_calls)
+
+        while todos:
+            tool_calls = todos.pop(0)
+            for tool_call in tool_calls:
                 result = await self._handle_tool_call(tool_call)
+                logger.debug(f'tool_result: {result}')
                 tool_results.append(result)
                 
                 # Track skill queries
@@ -425,22 +434,28 @@ When given a task:
                 ))
             
             # If there were tool calls, get final response
-            final_messages = self._build_messages([])
-            final_response = await self.client.chat.completions.create(
+            tool_result_messages = self._build_messages([])
+            tool_result_response = await self.client.chat.completions.create(
                 model=self.model,
-                messages=final_messages,
+                messages=tool_result_messages,
                 temperature=self.temperature,
                 #max_tokens=self.max_tokens
             )
-            content = final_response.choices[0].message.content or ""
-            
+            tchoice = response.choices[0]
+            tmessage = choice.message
+            tcontent = message.content or ""
+            logger.debug(f'content: {tcontent}')
+            content += tcontent
+            if tmessage.tool_calls:
+                todos.append(tool_calls)
+
+           
             # Update token stats
-            if final_response.usage:
-                self._stats["total_tokens"] += final_response.usage.total_tokens
-                self._stats["prompt_tokens"] += final_response.usage.prompt_tokens
-                self._stats["completion_tokens"] += final_response.usage.completion_tokens
+            if tool_result_response.usage:
+                self._stats["total_tokens"] += tool_result_response.usage.total_tokens
+                self._stats["prompt_tokens"] += tool_result_response.usage.prompt_tokens
+                self._stats["completion_tokens"] += tool_result_response.usage.completion_tokens
         
-        logger.debug(f'content:{content}\ntool_results: {tool_results}')
 
         return content, tool_results
     

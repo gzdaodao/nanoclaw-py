@@ -90,6 +90,14 @@ class VolumeMountBuilder:
                     readonly=True
                 ))
         
+            # share memory directory
+            global_dir = self.groups_dir / 'share'
+            if global_dir.exists():
+                mounts.append(VolumeMount(
+                    hostPath='{}/{}'.format(HOST_DIR,str(global_dir)),
+                    containerPath='/workspace/share',
+                    readonly=True
+                ))
         
         # Sync skills
         self._sync_skills(group_dir)
@@ -126,13 +134,13 @@ class VolumeMountBuilder:
     
     def _sync_skills(self, group_dir: Path) -> None:
         """Sync skills to group sessions directory"""
+        skills_dst = group_dir / 'skills'
+        skills_dst.mkdir(parents=True, exist_ok=True)
+ 
         skills_src = self.groups_dir / 'global' / 'skills'
         if not skills_src.exists():
             return
-        
-        skills_dst = group_dir / 'skills'
-        skills_dst.mkdir(parents=True, exist_ok=True)
-        
+       
         for skill_dir in skills_src.iterdir():
             if not skill_dir.is_dir():
                 continue

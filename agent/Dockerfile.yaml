@@ -31,11 +31,31 @@ RUN pip install --no-cache-dir \
     black \
     flake8
 
+# 创建 Playwright 浏览器缓存目录
+RUN mkdir -p /root/cache/
+COPY ./cache /root/cache/
+
+COPY ./install_with_server.sh /tmp/install_with_server.sh
+
+RUN chmod +x /tmp/install_with_server.sh
+
+RUN /tmp/install_with_server.sh
+
+
+ENV PLAYWRIGHT_DOWNLOAD_HOST=http://localhost:8080/
+
+## 安装 Playwright 依赖
+#RUN pip install playwright && \
+#    playwright install chromium && \
+#    playwright install-deps
+
+RUN rm /root/cache/ -rf
+
 # 复制代码
 COPY agent_runner/ ./agent_runner/
 
 # 创建必要目录
-RUN mkdir -p /workspace/group /workspace/ipc/input /workspace/ipc/messages
+RUN mkdir -p /workspace/group /workspace/ipc/input /workspace/ipc/messages /workspace/group/skills
 
 
 # Set up volume mount points

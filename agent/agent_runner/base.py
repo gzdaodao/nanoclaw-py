@@ -155,12 +155,12 @@ class Agent(ABC):
         self._last_activity = datetime.now()
         
         # Add system message if not already present
-        if not any(msg.role == "system" for msg in self.history):
-            system_msg = AgentMessage(
-                role="system",
-                content=f"You are {self.name}, a helpful assistant."
-            )
-            self.add_to_history(system_msg)
+        #if not any(msg.role == "system" for msg in self.history):
+        #    system_msg = AgentMessage(
+        #        role="system",
+        #        content=f"You are {self.name}, a helpful assistant."
+        #    )
+        #    self.add_to_history(system_msg)
     
     @abstractmethod
     async def process_messages(self, messages: List[str], **kwargs) -> AgentResponse:

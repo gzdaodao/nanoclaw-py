@@ -6,9 +6,25 @@ from pathlib import Path
 from typing import Optional, List
 import os
 import shutil
+import base64
 
 from agent_runner.tools.base import BaseTool, ToolPlugin, ToolMetadata, ToolContext, ToolResult
 from agent_runner.logger import logger
+
+
+class PathSecurity:
+    """Security utilities for paths"""
+    
+    @staticmethod
+    def ensure_within_base(base_dir: Path, resolved_path: Path) -> None:
+        """Ensure path is within base directory"""
+        try:
+            resolved_path.relative_to(base_dir)
+        except ValueError:
+            raise ValueError(f"File tools' Path not allow to escapes base directory: {resolved_path}")
+
+
+path_security = PathSecurity()
 
 
 class ReadFileTool(BaseTool):
@@ -25,11 +41,10 @@ class ReadFileTool(BaseTool):
                     "description": "Path to the file (relative to workspace)",
                     "required": True
                 },
-                "encoding": {
-                    "type": "string",
-                    "description": "File encoding (default: utf-8)",
-                    "enum": ["utf-8", "ascii", "latin-1"],
-                    "default": "utf-8"
+                "base64_content": {
+                    "type": "boolean",
+                    "description": "return file content with base64 encode",
+                    "default": True
                 }
             },
             category="filesystem",
@@ -37,28 +52,27 @@ class ReadFileTool(BaseTool):
             version="1.0.0"
         )
     
-    async def execute(self, path: str, encoding: str = "utf-8") -> ToolResult:
+    async def execute(self, path: str, base64_content: bool = True) -> ToolResult:
         """Execute read file"""
         try:
-            # Security: prevent path traversal
-            if '..' in path or path.startswith('/'):
-                return ToolResult.fail("Invalid path: path traversal detected")
+            path = Path(path)
+            path_security.ensure_within_base(self.context.workspace_dir, path)
             
-            full_path = self.context.workspace_dir / path
-            if not full_path.exists():
+            if not path.exists():
                 return ToolResult.fail(f"File not found: {path}")
             
-            if not full_path.is_file():
+            if not path.is_file():
                 return ToolResult.fail(f"Not a file: {path}")
             
-            async with aiofiles.open(full_path, 'r', encoding=encoding) as f:
+            async with aiofiles.open(path, 'rb') as f:
                 content = await f.read()
+                if base64_content:
+                    content = base64.b64encode(content).decode('utf-8')
             
             return ToolResult.ok({
                 "content": content,
-                "path": path,
+                "path": str(path),
                 "size": len(content),
-                "encoding": encoding
             })
             
         except Exception as e:
@@ -90,38 +104,39 @@ class WriteFileTool(BaseTool):
                     "enum": ["write", "append"],
                     "default": "write"
                 },
-                "encoding": {
-                    "type": "string",
-                    "description": "File encoding",
-                    "default": "utf-8"
+                "base64_content": {
+                    "type": "boolean",
+                    "description": "If pass true,the Input file conent should base64 encoded",
+                    "default": True
                 }
+
             },
             category="filesystem",
             required_permissions=["filesystem:write"],
             version="1.0.0"
         )
     
-    async def execute(self, path: str, content: str, mode: str = "write", encoding: str = "utf-8") -> ToolResult:
+    async def execute(self, path: str, content: str, mode: str = "write", base64_content: bool = True) -> ToolResult:
         """Execute write file"""
         try:
-            # Security: prevent path traversal
-            if '..' in path or path.startswith('/'):
-                return ToolResult.fail("Invalid path: path traversal detected")
-            
-            full_path = self.context.workspace_dir / path
+            path = Path(path)
+            path_security.ensure_within_base(self.context.workspace_dir, path)
+            if base64_content:
+                content = base64.b64decode(content)
+
+ 
             
             # Create parent directories if needed
-            full_path.parent.mkdir(parents=True, exist_ok=True)
+            path.parent.mkdir(parents=True, exist_ok=True)
             
-            file_mode = 'w' if mode == 'write' else 'a'
-            async with aiofiles.open(full_path, file_mode, encoding=encoding) as f:
+            file_mode = 'wb' if mode == 'write' else 'a'
+            async with aiofiles.open(path, file_mode) as f:
                 await f.write(content)
             
             return ToolResult.ok({
                 "path": path,
                 "mode": mode,
                 "size": len(content),
-                "encoding": encoding
             })
             
         except Exception as e:
@@ -161,26 +176,25 @@ class ListFilesTool(BaseTool):
     async def execute(self, path: str = ".", pattern: str = "*", recursive: bool = False) -> ToolResult:
         """Execute list files"""
         try:
-            # Security: prevent path traversal
-            if '..' in path:
-                return ToolResult.fail("Invalid path: path traversal detected")
+            path = Path(path)
+            path_security.ensure_within_base(self.context.workspace_dir, path)
+ 
             
-            full_path = self.context.workspace_dir / path
-            if not full_path.exists():
+            if not path.exists():
                 return ToolResult.fail(f"Directory not found: {path}")
             
-            if not full_path.is_dir():
+            if not path.is_dir():
                 return ToolResult.fail(f"Not a directory: {path}")
             
             files = []
             if recursive:
-                for root, dirs, filenames in os.walk(full_path):
+                for root, dirs, filenames in os.walk(path):
                     rel_root = Path(root).relative_to(self.context.workspace_dir)
                     for f in filenames:
                         if Path(f).match(pattern):
                             files.append(str(rel_root / f))
             else:
-                for f in full_path.glob(pattern):
+                for f in path.glob(pattern):
                     if f.is_file():
                         files.append(str(f.relative_to(self.context.workspace_dir)))
             
