@@ -169,6 +169,13 @@ class Agent(ABC):
     
     async def process_message(self, message: str, **kwargs) -> AgentResponse:
         """Process a single message"""
+        if '<p>/new</p>' in message:
+            self.clear_history()
+ 
+            return AgentResponse(
+                content='Started new session.',
+            )
+
         return await self.process_messages([message], **kwargs)
     
     @abstractmethod

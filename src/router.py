@@ -1,6 +1,7 @@
 # router.py - 面向对象版本
 import re
 from typing import List, Optional
+import json
 
 from .dtypes import NewMessage, Channel
 
@@ -18,16 +19,29 @@ class MessageFormatter:
                   .replace('>', '&gt;')
                   .replace('"', '&quot;'))
     
+    #@classmethod
+    #def format_messages(cls, messages: List[NewMessage]) -> str:
+    #    """Format messages as XML"""
+    #    lines = []
+    #    for m in messages:
+    #        lines.append(
+    #            f'<message sender="{cls.escape_xml(m.sender_name)}" time="{m.timestamp}">'
+    #            f'{cls.escape_xml(m.content)}</message>'
+    #        )
+    #    return '<messages>\n' + '\n'.join(lines) + '\n</messages>'
+
+ 
     @classmethod
     def format_messages(cls, messages: List[NewMessage]) -> str:
-        """Format messages as XML"""
         lines = []
         for m in messages:
-            lines.append(
-                f'<message sender="{cls.escape_xml(m.sender_name)}" time="{m.timestamp}">'
-                f'{cls.escape_xml(m.content)}</message>'
-            )
-        return '<messages>\n' + '\n'.join(lines) + '\n</messages>'
+            lines.append({
+                'sender': m.sender_name,
+                'time': m.timestamp,
+                'message': m.content,
+                })
+
+        return json.dumps(lines, ensure_ascii=False)
 
 
 class InternalTagStripper:

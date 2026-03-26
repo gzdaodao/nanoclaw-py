@@ -258,6 +258,7 @@ When given a task:
     
     async def process_messages(self, messages: List[str], **kwargs) -> AgentResponse:
         """Process multiple messages"""
+
         if not self._running:
             await self.initialize()
         
@@ -428,7 +429,7 @@ When given a task:
                 # Add tool result to history
                 self.add_to_history(AgentMessage(
                     role="tool",
-                    content=json.dumps(result),
+                    content=json.dumps(result, ensure_ascii=False),
                     tool_call_id=tool_call.id,
                     name=tool_call.function.name
                 ))

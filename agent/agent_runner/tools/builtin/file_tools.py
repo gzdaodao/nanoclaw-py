@@ -45,14 +45,21 @@ class ReadFileTool(BaseTool):
                     "type": "boolean",
                     "description": "return file content with base64 encode",
                     "default": True
+                },
+                "encoding": {
+                    "type": "string",
+                    "description": "File encoding (default: utf-8)",
+                    "enum": ["utf-8", "ascii", "latin-1"],
+                    "default": "utf-8"
                 }
+
             },
             category="filesystem",
             required_permissions=["filesystem:read"],
             version="1.0.0"
         )
     
-    async def execute(self, path: str, base64_content: bool = True) -> ToolResult:
+    async def execute(self, path: str, base64_content: bool = True, encoding: str = "utf-8") -> ToolResult:
         """Execute read file"""
         try:
             path = Path(path)
@@ -64,10 +71,14 @@ class ReadFileTool(BaseTool):
             if not path.is_file():
                 return ToolResult.fail(f"Not a file: {path}")
             
-            async with aiofiles.open(path, 'rb') as f:
-                content = await f.read()
-                if base64_content:
+            if base64_content:
+                async with aiofiles.open(path, 'rb') as f:
+                    content = await f.read()
                     content = base64.b64encode(content).decode('utf-8')
+            else:
+                async with aiofiles.open(path, 'r', encoding=encoding) as f:
+                    content = await f.read()
+ 
             
             return ToolResult.ok({
                 "content": content,
@@ -108,7 +119,14 @@ class WriteFileTool(BaseTool):
                     "type": "boolean",
                     "description": "If pass true,the Input file conent should base64 encoded",
                     "default": True
+                },
+                "encoding": {
+                    "type": "string",
+                    "description": "File encoding (default: utf-8)",
+                    "enum": ["utf-8", "ascii", "latin-1"],
+                    "default": "utf-8"
                 }
+
 
             },
             category="filesystem",
@@ -116,16 +134,14 @@ class WriteFileTool(BaseTool):
             version="1.0.0"
         )
     
-    async def execute(self, path: str, content: str, mode: str = "write", base64_content: bool = True) -> ToolResult:
+    async def execute(self, path: str, content: str, mode: str = "write", base64_content: bool = True, encoding: str = 'utf-8') -> ToolResult:
         """Execute write file"""
         try:
             path = Path(path)
             path_security.ensure_within_base(self.context.workspace_dir, path)
             if base64_content:
-                content = base64.b64decode(content)
+                content = base64.b64decode(content).decode(encoding)
 
- 
-            
             # Create parent directories if needed
             path.parent.mkdir(parents=True, exist_ok=True)
             
