@@ -309,11 +309,11 @@ When given a task:
             self._stats["tool_calls"] += len(tool_results)
             
             # Add assistant response to history
-            self.add_to_history(AgentMessage(
-                role="assistant",
-                content=content,
-                tool_calls=response.choices[0].message.tool_calls
-            ))
+            #self.add_to_history(AgentMessage(
+            #    role="assistant",
+            #    content=content,
+            #    tool_calls=response.choices[0].message.tool_calls
+            #))
             
             return AgentResponse(
                 content=content,
@@ -408,16 +408,19 @@ When given a task:
         message = choice.message
         content = message.content or ""
         tool_results = []
-        todos = []
         logger.debug(f'content:{content}')
         
+        # Add assistant response to history
+        self.add_to_history(AgentMessage(
+            role="assistant",
+            content=content,
+            tool_calls=message.tool_calls
+        ))
+ 
+        
         # Handle tool calls
-        if message.tool_calls:
-            todos.append(message.tool_calls)
-
-        while todos:
-            tool_calls = todos.pop(0)
-            for tool_call in tool_calls:
+        while message.tool_calls:
+            for tool_call in message.tool_calls:
                 result = await self._handle_tool_call(tool_call)
                 logger.debug(f'tool_result: {result}')
                 tool_results.append(result)
@@ -435,27 +438,25 @@ When given a task:
                 ))
             
             # If there were tool calls, get final response
-            tool_result_messages = self._build_messages([])
-            tool_result_response = await self.client.chat.completions.create(
+            message_his = self._build_messages([])
+            response = await self.client.chat.completions.create(
                 model=self.model,
-                messages=tool_result_messages,
+                messages=message_his,
                 temperature=self.temperature,
                 #max_tokens=self.max_tokens
             )
-            tchoice = response.choices[0]
-            tmessage = choice.message
+            choice = response.choices[0]
+            message = choice.message
             tcontent = message.content or ""
-            logger.debug(f'content: {tcontent}')
+            logger.debug(f'tcontent: {tcontent}')
             content += tcontent
-            if tmessage.tool_calls:
-                todos.append(tool_calls)
 
            
             # Update token stats
-            if tool_result_response.usage:
-                self._stats["total_tokens"] += tool_result_response.usage.total_tokens
-                self._stats["prompt_tokens"] += tool_result_response.usage.prompt_tokens
-                self._stats["completion_tokens"] += tool_result_response.usage.completion_tokens
+            if response.usage:
+                self._stats["total_tokens"] += response.usage.total_tokens
+                self._stats["prompt_tokens"] += response.usage.prompt_tokens
+                self._stats["completion_tokens"] += response.usage.completion_tokens
         
 
         return content, tool_results

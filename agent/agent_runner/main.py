@@ -72,7 +72,7 @@ class AgentRunner:
         
         # Load context from environment
         context = AgentContext(
-            session_id=self._input_data['sessionId'],
+            session_id=self._input_data['sessionId'] or self._input_data['chatJid'],
             group_folder=self._input_data['groupFolder'],
             chat_id=self._input_data['chatJid'],
             is_main=self._input_data['isMain'],
