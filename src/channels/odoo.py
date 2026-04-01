@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, List, Callable
 from loguru import logger
 from aioxmlrpc.client import ServerProxy
 import markdown
+from traceback import format_exc
 
 from .base import Channel, InboundMessage
 from .. import config
@@ -400,6 +401,12 @@ class OdooChannel(Channel):
                 # Exponential backoff
                 backoff = min(30, self.poll_interval * (2 ** consecutive_errors))
                 await asyncio.sleep(backoff)
+
+    async def _process_inbound_message(self, msg: InboundMessage) -> None:
+        res = await super()._process_inbound_message(msg)
+        await self._save_last_message_ids()
+
+        return res
 
     async def _check_channels(self) -> None:
         """Check for new messages in channels."""
@@ -806,5 +813,8 @@ class OdooChannel(Channel):
                 with open(ids_file, 'r') as f:
                     self._last_message_ids = json.load(f)
                 logger.info(f"Loaded last message IDs for {len(self._last_message_ids)} conversations")
+            else:
+                logger.debug(f"No last message IDs file found: {ids_file}")
         except Exception as e:
-            logger.debug(f"No last message IDs found: {e}")
+            msg = format_exc()
+            logger.debug(f"Load last message IDs fail: {msg}")
