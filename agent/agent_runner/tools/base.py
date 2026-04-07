@@ -91,6 +91,9 @@ class BaseTool(ABC):
         required = self.metadata.required_permissions
         if not required:
             return True
+
+        if '*' in self.context.permissions:
+            return True
         
         user_permissions = set(self.context.permissions)
         return all(perm in user_permissions for perm in required)

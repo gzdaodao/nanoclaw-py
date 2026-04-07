@@ -69,7 +69,7 @@ class OpenAIAgent(Agent):
         self.max_tokens = max_tokens
         self.custom_system_prompt = system_prompt
         self.tool_categories = tool_categories or [
-            "general", "filesystem", "communication", "system", "skills", ""
+            "general", "filesystem", "communication", "system", "skills",
         ]
         self.request_timeout = request_timeout
         self.max_retries = max_retries
@@ -139,13 +139,7 @@ class OpenAIAgent(Agent):
             is_main=self.context.is_main,
             workspace_dir=self.context.workspace_dir,
             ipc_client=self.ipc_client,
-            permissions=["*"] if self.context.is_main else [
-                "filesystem:read", "filesystem:write",
-                "communication:send", "communication:read",
-                "memory:read", "memory:write", "system:execute",
-                "browser",
-            ]
-        )
+            permissions=["*"])
     
     async def initialize(self) -> None:
         """Initialize agent, load plugins and skills"""
@@ -220,7 +214,8 @@ Main group: {self.context.is_main}
 3. Provide skill details when users want to learn more
 4. Use other tools when appropriate
 5. Keep responses clear and helpful
-6. When a tool result returns an error, check whether there is an issue with the tool call parameters. If there is an issue, correct it and call the tool again. If a tool fails multiple times and the issue cannot be resolved, stop calling that tool or use an alternative tool. If neither approach works, stop all tool calls and return the error message for me to resolve.
+6. Tool call must strictly adhere to the OpenAI standards
+7. When a tool result returns an error, check whether there is an issue with the tool call parameters. If there is an issue, correct it and call the tool again. If a tool fails multiple times and the issue cannot be resolved, stop calling that tool or use an alternative tool. If neither approach works, stop all tool calls and return the error message for me to resolve.
 
 ## WORKFLOW
 When given a task:

@@ -2,6 +2,8 @@
 """极简分布式技能加载器 - 每个技能独立索引文件"""
 
 import json
+import shutil
+import uuid as uuid_lib
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
@@ -78,6 +80,156 @@ class SkillLoader:
         self._load_time = datetime.now()
         logger.info(f"Loaded {count} skills from {self.skills_root}")
         return count
+    
+    def create_skill(self, name: str, description: str, content: str) -> Optional[Dict[str, Any]]:
+        """
+        创建新技能
+        
+        Args:
+            name: 技能名称
+            description: 技能简短描述
+            content: 技能详细内容 (skill.md)
+            
+        Returns:
+            创建成功的技能信息字典，失败返回 None
+        """
+        # 检查技能名称是否已存在
+        if name in self.skills_by_name:
+            logger.warning(f"Skill with name '{name}' already exists")
+            return None
+        
+        # 生成 UUID
+        skill_uuid = str(uuid_lib.uuid4())
+        
+        # 创建技能目录（使用 UUID 作为目录名）
+        skill_dir = self.skills_root / skill_uuid
+        try:
+            skill_dir.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            logger.error(f"Skill directory already exists: {skill_dir}")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to create skill directory: {e}")
+            return None
+        
+        # 写入 index.json
+        index_data = {
+            "uuid": skill_uuid,
+            "name": name,
+            "description": description,
+            "created_at": datetime.now().isoformat()
+        }
+        
+        index_file = skill_dir / "index.json"
+        try:
+            index_file.write_text(
+                json.dumps(index_data, ensure_ascii=False, indent=2),
+                encoding='utf-8'
+            )
+        except Exception as e:
+            logger.error(f"Failed to write index.json: {e}")
+            # 清理已创建的目录
+            try:
+                skill_dir.rmdir()
+            except Exception:
+                pass
+            return None
+        
+        # 写入 skill.md
+        readme_file = skill_dir / "skill.md"
+        try:
+            readme_file.write_text(content, encoding='utf-8')
+        except Exception as e:
+            logger.error(f"Failed to write skill.md: {e}")
+            # 清理已创建的文件和目录
+            try:
+                index_file.unlink()
+                skill_dir.rmdir()
+            except Exception:
+                pass
+            return None
+        
+        # 创建 Skill 对象并加入缓存
+        skill = Skill(
+            uuid=skill_uuid,
+            name=name,
+            description=description,
+            path=skill_dir,
+            readme=content  # 预填充 readme 缓存
+        )
+        
+        self.skills[skill_uuid] = skill
+        self.skills_by_name[name] = skill
+        
+        logger.info(f"Created skill: {name} ({skill_uuid})")
+        
+        return {
+            "uuid": skill_uuid,
+            "name": name,
+            "description": description,
+            "path": str(skill_dir),
+            "readme": content
+        }
+    
+    def delete_skill(self, identifier: str, force: bool = False) -> Optional[Dict[str, Any]]:
+        """
+        删除技能
+        
+        Args:
+            identifier: 技能标识符（UUID 或名称）
+            force: 是否强制删除（如果为 False，仅返回确认信息）
+            
+        Returns:
+            删除成功的技能信息字典，失败返回 None
+        """
+        # 获取技能
+        skill = self.get_skill(identifier)
+        if not skill:
+            logger.warning(f"Skill not found: {identifier}")
+            return None
+        
+        # 如果不是强制删除，返回确认信息
+        if not force:
+            logger.info(f"Delete requested for skill '{skill.name}' ({skill.uuid}) but force=False")
+            return {
+                "uuid": skill.uuid,
+                "name": skill.name,
+                "description": skill.description,
+                "path": str(skill.path),
+                "requires_confirmation": True,
+                "message": f"Skill '{skill.name}' found. Set force=True to delete permanently."
+            }
+        
+        try:
+            # 保存技能信息以便返回
+            skill_info = {
+                "uuid": skill.uuid,
+                "name": skill.name,
+                "description": skill.description,
+                "path": str(skill.path),
+                "deleted": False
+            }
+            
+            # 删除技能目录及其内容
+            if skill.path.exists():
+                shutil.rmtree(skill.path)
+                logger.info(f"Deleted skill directory: {skill.path}")
+                skill_info["deleted"] = True
+            else:
+                logger.warning(f"Skill directory does not exist: {skill.path}")
+                skill_info["deleted"] = False
+                skill_info["warning"] = "Directory did not exist"
+            
+            # 从缓存中移除
+            self.skills.pop(skill.uuid, None)
+            self.skills_by_name.pop(skill.name, None)
+            
+            logger.info(f"Skill deleted successfully: {skill.name} ({skill.uuid})")
+            return skill_info
+            
+        except Exception as e:
+            logger.error(f"Failed to delete skill '{skill.name}': {e}")
+            return None
     
     def get_skill(self, identifier: str) -> Optional[Skill]:
         """通过 UUID 或名称获取技能"""
@@ -216,3 +368,32 @@ def get_skills_summary() -> str:
 def get_all_skills() -> List[Dict]:
     """获取所有技能列表"""
     return get_skill_loader().get_all_skills()
+
+
+def create_skill(name: str, description: str, content: str) -> Optional[Dict]:
+    """
+    创建新技能（便捷函数）
+    
+    Args:
+        name: 技能名称
+        description: 技能简短描述
+        content: 技能详细内容 (skill.md)
+        
+    Returns:
+        创建成功的技能信息字典，失败返回 None
+    """
+    return get_skill_loader().create_skill(name, description, content)
+
+
+def delete_skill(identifier: str, force: bool = False) -> Optional[Dict]:
+    """
+    删除技能（便捷函数）
+    
+    Args:
+        identifier: 技能标识符（UUID 或名称）
+        force: 是否强制删除
+        
+    Returns:
+        删除成功的技能信息字典，失败返回 None
+    """
+    return get_skill_loader().delete_skill(identifier, force)

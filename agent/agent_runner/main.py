@@ -98,7 +98,7 @@ class AgentRunner:
             "temperature": float(configs.get('OPENAI_TEMPERATURE', '0.5')),
             "max_tokens": int(configs.get('OPENAI_MAX_TOKENS', '2000000000')),
             "enable_skill_learning": configs.get('ENABLE_SKILL_LEARNING', True),
-            "tool_categories": configs.get('TOOL_CATEGORIES', 'general,filesystem,communication,data,system,skill_management,skill_execution,memory,web').split(',')
+            "tool_categories": configs.get('TOOL_CATEGORIES', 'general,filesystem,communication,data,system,skills,memory,web').split(',')
         }
         
         # Create agent
