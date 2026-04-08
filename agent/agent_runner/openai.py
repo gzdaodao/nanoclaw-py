@@ -215,7 +215,6 @@ Main group: {self.context.is_main}
 4. Use other tools when appropriate
 5. Keep responses clear and helpful
 6. Tool call must strictly adhere to the OpenAI standards
-7. When a tool result returns an error, check whether there is an issue with the tool call parameters. If there is an issue, correct it and call the tool again. If a tool fails multiple times and the issue cannot be resolved, stop calling that tool or use an alternative tool. If neither approach works, stop all tool calls and return the error message for me to resolve.
 
 ## WORKFLOW
 When given a task:
