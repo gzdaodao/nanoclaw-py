@@ -86,8 +86,8 @@ class OdooChannel(Channel):
                 await self._load_session()
                 
                 # Create async RPC clients
-                self.common = ServerProxy(f'{self.url}/xmlrpc/2/common')
-                self.object = ServerProxy(f'{self.url}/xmlrpc/2/object')
+                self.common = ServerProxy(f'{self.url}/xmlrpc/common')
+                self.object = ServerProxy(f'{self.url}/xmlrpc/object')
                 
                 # Authenticate
                 await self._authenticate()

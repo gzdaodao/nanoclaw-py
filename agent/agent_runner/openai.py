@@ -9,9 +9,8 @@ from typing import Dict, List, Optional, Any, Callable, Union, Awaitable
 from datetime import datetime
 import traceback
 import inspect
-
-import openai
-from openai import AsyncOpenAI
+import aiohttp
+from aiohttp import ClientTimeout, ClientSession
 
 from .base import Agent, AgentContext, AgentMessage, AgentResponse, AgentFactory
 from .logger import logger
@@ -76,16 +75,14 @@ class OpenAIAgent(Agent):
  
         # IPC
         self.ipc_client = IpcClient()
-
         
-        # Initialize OpenAI client
-        self.client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            organization=org_id,
-            timeout=request_timeout,
-            max_retries=max_retries
-        )
+        # OpenAI API configuration
+        self.api_key = api_key
+        self.base_url = base_url.rstrip('/')
+        self.org_id = org_id
+        
+        # HTTP session
+        self._session: Optional[ClientSession] = None
         
         # Plugin system
         self.plugin_loader = PluginLoader(plugin_dirs or self._default_plugin_dirs())
@@ -141,12 +138,22 @@ class OpenAIAgent(Agent):
             ipc_client=self.ipc_client,
             permissions=["*"])
     
+    async def _get_session(self) -> ClientSession:
+        """Get or create HTTP session"""
+        if self._session is None or self._session.closed:
+            timeout = ClientTimeout(total=self.request_timeout)
+            self._session = ClientSession(timeout=timeout)
+        return self._session
+    
     async def initialize(self) -> None:
         """Initialize agent, load plugins and skills"""
         logger.info(f"Initializing OpenAI agent: {self.name}")
         
         # Connect IPC
         await self.ipc_client.connect()
+        
+        # Initialize HTTP session
+        await self._get_session()
         
         # Load all skills
         try:
@@ -161,12 +168,6 @@ class OpenAIAgent(Agent):
                
         # Build system prompt
         self.system_prompt = self._build_system_prompt()
-        #if not any(msg.role == "system" for msg in self.history):
-        #    # Add system message to history
-        #    self.add_to_history(AgentMessage(
-        #        role="system",
-        #        content=self.system_prompt
-        #    ))
         
         await super().initialize()
         
@@ -196,7 +197,6 @@ class OpenAIAgent(Agent):
         # Get skills summary
         skills_summary = get_skills_summary()
         
-       
         # Build prompt
         prompt = f"""You are {self.context.assistant_name}, an AI assistant with access to various skills and tools.
 You are in group: {self.context.group_folder}
@@ -237,7 +237,7 @@ When given a task:
     
     def _build_messages(self, new_messages: List[str]) -> List[Dict[str, Any]]:
         """Build messages for OpenAI API"""
-        messages = [{"role": "system", "content":self.system_prompt}]
+        messages = [{"role": "system", "content": self.system_prompt}]
         
         # Add conversation history
         for msg in self.get_recent_history(self.max_history):
@@ -250,9 +250,56 @@ When given a task:
         
         return messages
     
+    async def _make_api_request(
+        self, 
+        messages: List[Dict[str, Any]], 
+        tools: List[Dict[str, Any]] = None, 
+        stream: bool = False
+    ) -> Dict[str, Any]:
+        """Make async HTTP request to OpenAI API"""
+        url = f"{self.base_url}/chat/completions"
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+        
+        if self.org_id:
+            headers["OpenAI-Organization"] = self.org_id
+        
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "stream": stream
+        }
+        
+        if self.max_tokens and self.max_tokens != 2000000000:
+            payload["max_tokens"] = self.max_tokens
+        
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        
+        session = await self._get_session()
+        
+        # Make request with retries
+        last_exception = None
+        for attempt in range(self.max_retries):
+            try:
+                async with session.post(url, headers=headers, json=payload) as response:
+                    response.raise_for_status()
+                    return await response.json()
+            except aiohttp.ClientError as e:
+                last_exception = e
+                logger.error(f"API request failed (attempt {attempt + 1}/{self.max_retries}): {e}")
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                else:
+                    raise last_exception
+    
     async def process_messages(self, messages: List[str], **kwargs) -> AgentResponse:
         """Process multiple messages"""
-
         if not self._running:
             await self.initialize()
         
@@ -266,71 +313,39 @@ When given a task:
             # Get enabled tools
             tools = self._get_enabled_tools()
             
-            # Prepare completion arguments
-            completion_kwargs = {
-                "model": kwargs.get("model", self.model),
-                "messages": api_messages,
-                "temperature": kwargs.get("temperature", self.temperature),
-                #"max_tokens": kwargs.get("max_tokens", self.max_tokens),
-            }
-            
-            if tools:
-                completion_kwargs["tools"] = tools
-                completion_kwargs["tool_choice"] = "auto"
-            
-            # Remove None values
-            completion_kwargs = {k: v for k, v in completion_kwargs.items() if v is not None}
-            
-            # Call OpenAI
+            # Call OpenAI API
             self._stats["api_calls"] += 1
             start_time = time.time()
             
-            logger.info(f'completion_kwargs:{completion_kwargs}')
-            response = await self.client.chat.completions.create(**completion_kwargs)
+            response_data = await self._make_api_request(api_messages, tools)
             
             elapsed = (time.time() - start_time) * 1000
             
             # Update token stats
-            if response.usage:
-                self._stats["total_tokens"] += response.usage.total_tokens
-                self._stats["prompt_tokens"] += response.usage.prompt_tokens
-                self._stats["completion_tokens"] += response.usage.completion_tokens
+            if "usage" in response_data:
+                usage = response_data["usage"]
+                self._stats["total_tokens"] += usage.get("total_tokens", 0)
+                self._stats["prompt_tokens"] += usage.get("prompt_tokens", 0)
+                self._stats["completion_tokens"] += usage.get("completion_tokens", 0)
             
             # Process response and handle tool calls
-            content, tool_results = await self._process_response(response)
+            content, tool_results = await self._process_response(response_data)
             
             # Update tool call stats
             self._stats["tool_calls"] += len(tool_results)
             
-            # Add assistant response to history
-            #self.add_to_history(AgentMessage(
-            #    role="assistant",
-            #    content=content,
-            #    tool_calls=response.choices[0].message.tool_calls
-            #))
-            
             return AgentResponse(
                 content=content,
-                session_id=response.id,
+                session_id=response_data.get("id", ""),
                 metadata={
-                    "model": response.model,
+                    "model": response_data.get("model", self.model),
                     "elapsed_ms": round(elapsed, 2),
                     "tool_calls": len(tool_results),
-                    "usage": {
-                        "prompt_tokens": response.usage.prompt_tokens,
-                        "completion_tokens": response.usage.completion_tokens,
-                        "total_tokens": response.usage.total_tokens
-                    } if response.usage else None
+                    "usage": response_data.get("usage", {})
                 },
                 tool_results=tool_results
             )
             
-        except openai.APIError as e:
-            logger.error(f"OpenAI API error: {e}")
-            logger.info(format_exc())
-
-            self._stats["errors"] += 1
-            return AgentResponse(error=f"OpenAI API error: {e}")
         except Exception as e:
             logger.error(f"Error processing messages: {e}\n{traceback.format_exc()}")
             self._stats["errors"] += 1
@@ -358,30 +373,54 @@ When given a task:
             # Get enabled tools
             tools = self._get_enabled_tools()
             
-            # Prepare completion arguments
-            completion_kwargs = {
-                "model": kwargs.get("model", self.model),
-                "messages": api_messages,
-                "temperature": kwargs.get("temperature", self.temperature),
-                #"max_tokens": kwargs.get("max_tokens", self.max_tokens),
-                "stream": True
-            }
-            
-            if tools:
-                completion_kwargs["tools"] = tools
-                completion_kwargs["tool_choice"] = "auto"
-            
-            # Stream response
+            # Call streaming API
             self._stats["api_calls"] += 1
             full_content = ""
             
-            stream = await self.client.chat.completions.create(**completion_kwargs)
+            url = f"{self.base_url}/chat/completions"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}"
+            }
             
-            async for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    full_content += content
-                    await callback(content)
+            if self.org_id:
+                headers["OpenAI-Organization"] = self.org_id
+            
+            payload = {
+                "model": kwargs.get("model", self.model),
+                "messages": api_messages,
+                "temperature": kwargs.get("temperature", self.temperature),
+                "stream": True
+            }
+            
+            if self.max_tokens and self.max_tokens != 2000000000:
+                payload["max_tokens"] = kwargs.get("max_tokens", self.max_tokens)
+            
+            if tools:
+                payload["tools"] = tools
+                payload["tool_choice"] = "auto"
+            
+            session = await self._get_session()
+            
+            async with session.post(url, headers=headers, json=payload) as response:
+                response.raise_for_status()
+                
+                # Process SSE stream
+                async for line in response.content:
+                    line = line.decode('utf-8').strip()
+                    if line.startswith('data: '):
+                        data = line[6:]
+                        if data == '[DONE]':
+                            break
+                        
+                        try:
+                            chunk = json.loads(data)
+                            if chunk.get('choices') and chunk['choices'][0].get('delta', {}).get('content'):
+                                content = chunk['choices'][0]['delta']['content']
+                                full_content += content
+                                await callback(content)
+                        except json.JSONDecodeError:
+                            continue
             
             # Add to history
             self.add_to_history(AgentMessage(role="assistant", content=full_content))
@@ -395,71 +434,83 @@ When given a task:
         finally:
             self._processing = False
     
-    async def _process_response(self, response):
+    async def _process_response(self, response_data: Dict[str, Any]):
         """Process OpenAI response and handle tool calls"""
-        logger.info(f'_process_response:{response}')
-        choice = response.choices[0]
-        message = choice.message
-        content = message.content or ""
-        tool_results = []
-        logger.debug(f'content:{content}')
+        logger.info(f'_process_response: {response_data}')
         
-        # Add assistant response to history
+        if not response_data.get('choices'):
+            return "", []
+        
+        choice = response_data['choices'][0]
+        message = choice.get('message', {})
+        content = message.get('content', "") or ""
+        tool_results = []
+        
+        # Convert tool_calls to serializable format if present
+        tool_calls = None
+        if message.get('tool_calls'):
+            tool_calls = []
+            for tc in message['tool_calls']:
+                tool_calls.append({
+                    "id": tc.get('id'),
+                    "type": tc.get('type', 'function'),
+                    "function": {
+                        "name": tc.get('function', {}).get('name'),
+                        "arguments": tc.get('function', {}).get('arguments')
+                    }
+                })
+        
+        # Add assistant response to history (with serializable tool_calls)
         self.add_to_history(AgentMessage(
             role="assistant",
             content=content,
-            tool_calls=message.tool_calls
+            tool_calls=tool_calls
         ))
- 
         
         # Handle tool calls
-        while message.tool_calls:
-            for tool_call in message.tool_calls:
+        while message.get('tool_calls'):
+            for tool_call in message['tool_calls']:
                 result = await self._handle_tool_call(tool_call)
                 logger.debug(f'tool_result: {result}')
                 tool_results.append(result)
                 
                 # Track skill queries
-                if tool_call.function.name in ["search_skills", "get_skill_details"]:
+                if tool_call.get('function', {}).get('name') in ["search_skills", "get_skill_details"]:
                     self._stats["skill_queries"] += 1
                 
                 # Add tool result to history
                 self.add_to_history(AgentMessage(
                     role="tool",
-                    content=json.dumps(result, ensure_ascii=False),
-                    tool_call_id=tool_call.id,
-                    name=tool_call.function.name
+                    content=json.dumps(result) if isinstance(result, dict) else str(result),
+                    tool_call_id=tool_call.get('id'),
+                    name=tool_call.get('function', {}).get('name')
                 ))
             
             # If there were tool calls, get final response
-            message_his = self._build_messages([])
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=message_his,
-                temperature=self.temperature,
-                #max_tokens=self.max_tokens
-            )
-            choice = response.choices[0]
-            message = choice.message
-            tcontent = message.content or ""
-            logger.debug(f'tcontent: {tcontent}')
-            content += tcontent
-
-           
-            # Update token stats
-            if response.usage:
-                self._stats["total_tokens"] += response.usage.total_tokens
-                self._stats["prompt_tokens"] += response.usage.prompt_tokens
-                self._stats["completion_tokens"] += response.usage.completion_tokens
+            api_messages = self._build_messages([])
+            response_data = await self._make_api_request(api_messages)
+            
+            if response_data.get('choices'):
+                choice = response_data['choices'][0]
+                message = choice.get('message', {})
+                tcontent = message.get('content', "") or ""
+                logger.debug(f'tcontent: {tcontent}')
+                content += tcontent
+                
+                # Update token stats
+                if "usage" in response_data:
+                    usage = response_data["usage"]
+                    self._stats["total_tokens"] += usage.get("total_tokens", 0)
+                    self._stats["prompt_tokens"] += usage.get("prompt_tokens", 0)
+                    self._stats["completion_tokens"] += usage.get("completion_tokens", 0)
         
-
         return content, tool_results
     
-    async def _handle_tool_call(self, tool_call) -> Dict[str, Any]:
+    async def _handle_tool_call(self, tool_call: Dict[str, Any]) -> Dict[str, Any]:
         """Handle a single tool call"""
         try:
-            function_name = tool_call.function.name
-            arguments = json.loads(tool_call.function.arguments)
+            function_name = tool_call.get('function', {}).get('name', '')
+            arguments = json.loads(tool_call.get('function', {}).get('arguments', '{}'))
             
             logger.info(f"Executing tool: {function_name} with args: {arguments}")
             
@@ -485,7 +536,7 @@ When given a task:
             logger.error(f"Tool execution error: {e}")
             logger.debug(traceback.format_exc())
             return {
-                "tool": tool_call.function.name,
+                "tool": tool_call.get('function', {}).get('name', 'unknown'),
                 "success": False,
                 "error": str(e)
             }
@@ -511,6 +562,10 @@ When given a task:
     async def stop(self) -> None:
         """Stop the agent"""
         logger.info(f"Stopping agent: {self.name}")
+        
+        # Close HTTP session
+        if self._session and not self._session.closed:
+            await self._session.close()
         
         # Cleanup plugins
         for plugin in self.plugins.values():
