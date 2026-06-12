@@ -461,7 +461,7 @@ When given a task:
         ))
         
         # Handle tool calls
-        for tool_call in message['tool_calls']:
+        for tool_call in message.get('tool_calls', []):
             result = await self._handle_tool_call(tool_call)
             logger.debug(f'tool_result: {result}')
             tool_results.append(result)
