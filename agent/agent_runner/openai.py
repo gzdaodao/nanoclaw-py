@@ -238,16 +238,15 @@ When given a task:
     def _build_messages(self, new_messages: List[str]) -> List[Dict[str, Any]]:
         """Build messages for OpenAI API"""
         messages = [{"role": "system", "content": self.system_prompt}]
+ 
+        # Add new messages
+        for content in new_messages:
+            self.add_to_history(AgentMessage(role="user", content=content))
         
         # Add conversation history
         for msg in self.get_recent_history(self.max_history):
             messages.append(msg.to_dict())
-        
-        # Add new messages
-        for content in new_messages:
-            messages.append({"role": "user", "content": content})
-            self.add_to_history(AgentMessage(role="user", content=content))
-        
+               
         return messages
     
     async def _make_api_request(
@@ -266,6 +265,9 @@ When given a task:
         
         if self.org_id:
             headers["OpenAI-Organization"] = self.org_id
+
+        if not tools:
+            tools = self._get_enabled_tools()
         
         payload = {
             "model": self.model,
@@ -285,14 +287,16 @@ When given a task:
         
         # Make request with retries
         last_exception = None
+        logger.debug(f'_make_api_request payload:{payload}')
         for attempt in range(self.max_retries):
             try:
                 async with session.post(url, headers=headers, json=payload) as response:
+                    ct = await response.text()
                     response.raise_for_status()
                     return await response.json()
             except aiohttp.ClientError as e:
                 last_exception = e
-                logger.error(f"API request failed (attempt {attempt + 1}/{self.max_retries}): {e}")
+                logger.error(f"API request failed (attempt {attempt + 1}/{self.max_retries}): {e} {ct}")
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(2 ** attempt)  # Exponential backoff
                 else:
@@ -447,18 +451,7 @@ When given a task:
         tool_results = []
         
         # Convert tool_calls to serializable format if present
-        tool_calls = None
-        if message.get('tool_calls'):
-            tool_calls = []
-            for tc in message['tool_calls']:
-                tool_calls.append({
-                    "id": tc.get('id'),
-                    "type": tc.get('type', 'function'),
-                    "function": {
-                        "name": tc.get('function', {}).get('name'),
-                        "arguments": tc.get('function', {}).get('arguments')
-                    }
-                })
+        tool_calls = message.get('tool_calls')
         
         # Add assistant response to history (with serializable tool_calls)
         self.add_to_history(AgentMessage(
@@ -468,42 +461,46 @@ When given a task:
         ))
         
         # Handle tool calls
-        while message.get('tool_calls'):
-            for tool_call in message['tool_calls']:
-                result = await self._handle_tool_call(tool_call)
-                logger.debug(f'tool_result: {result}')
-                tool_results.append(result)
-                
-                # Track skill queries
-                if tool_call.get('function', {}).get('name') in ["search_skills", "get_skill_details"]:
-                    self._stats["skill_queries"] += 1
-                
-                # Add tool result to history
-                self.add_to_history(AgentMessage(
-                    role="tool",
-                    content=json.dumps(result) if isinstance(result, dict) else str(result),
-                    tool_call_id=tool_call.get('id'),
-                    name=tool_call.get('function', {}).get('name')
-                ))
+        for tool_call in message['tool_calls']:
+            result = await self._handle_tool_call(tool_call)
+            logger.debug(f'tool_result: {result}')
+            tool_results.append(result)
             
-            # If there were tool calls, get final response
-            api_messages = self._build_messages([])
-            response_data = await self._make_api_request(api_messages)
+            # Track skill queries
+            if tool_call.get('function', {}).get('name') in ["search_skills", "get_skill_details"]:
+                self._stats["skill_queries"] += 1
             
-            if response_data.get('choices'):
-                choice = response_data['choices'][0]
-                message = choice.get('message', {})
-                tcontent = message.get('content', "") or ""
-                logger.debug(f'tcontent: {tcontent}')
-                content += tcontent
-                
-                # Update token stats
-                if "usage" in response_data:
-                    usage = response_data["usage"]
-                    self._stats["total_tokens"] += usage.get("total_tokens", 0)
-                    self._stats["prompt_tokens"] += usage.get("prompt_tokens", 0)
-                    self._stats["completion_tokens"] += usage.get("completion_tokens", 0)
+            # Add tool result to history
+            self.add_to_history(AgentMessage(
+                role="tool",
+                content=json.dumps(result) if isinstance(result, dict) else str(result),
+                tool_call_id=tool_call.get('id'),
+                name=tool_call.get('function', {}).get('name')
+            ))
         
+        # If there were tool calls, get final response
+        api_messages = self._build_messages([])
+        response_data = await self._make_api_request(api_messages)
+        
+        
+        #if response_data.get('choices'):
+        #    choice = response_data['choices'][0]
+        #    message = choice.get('message', {})
+        #    tcontent = message.get('content', "") or ""
+        #    logger.debug(f'tcontent: {tcontent}')
+        #    content += tcontent
+        #    
+        #    # Update token stats
+        #    if "usage" in response_data:
+        #        usage = response_data["usage"]
+        #        self._stats["total_tokens"] += usage.get("total_tokens", 0)
+        #        self._stats["prompt_tokens"] += usage.get("prompt_tokens", 0)
+        #        self._stats["completion_tokens"] += usage.get("completion_tokens", 0)
+    
+        tcontent, ttool_results = await self._process_response(response_data)
+        content += tcontent
+        tool_results.extend(ttool_results)
+
         return content, tool_results
     
     async def _handle_tool_call(self, tool_call: Dict[str, Any]) -> Dict[str, Any]:

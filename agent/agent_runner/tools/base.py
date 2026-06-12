@@ -100,22 +100,60 @@ class BaseTool(ABC):
     
     def get_openai_function_spec(self) -> Dict:
         """Get OpenAI function calling specification"""
+        # 标准化 parameters 格式
+        parameters = self._normalize_parameters(self.metadata.parameters)
+        
         return {
             "type": "function",
             "function": {
                 "name": self.metadata.name,
                 "description": self.metadata.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": self.metadata.parameters,
-                    "required": [
-                        name for name, spec in self.metadata.parameters.items()
-                        if spec.get("required", False)
-                    ]
-                }
+                "parameters": parameters
             }
         }
     
+    def _normalize_parameters(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        标准化参数格式为 OpenAI 要求的 schema
+        
+        支持两种输入格式：
+        1. 旧格式：{"param1": {"type": "string", "required": True}, ...}
+        2. 新格式：{"type": "object", "properties": {...}, "required": [...]}
+        """
+        # 如果已经是标准 OpenAI schema 格式
+        if params.get("type") == "object" and "properties" in params:
+            schema = params.copy()
+            # 确保 required 是数组格式
+            if "required" in schema:
+                if not isinstance(schema["required"], list):
+                    if schema["required"] is True:
+                        schema["required"] = list(schema.get("properties", {}).keys())
+                    else:
+                        del schema["required"]
+            return schema
+        
+        # 旧格式：转换为标准格式
+        properties = {}
+        required = []
+        
+        for param_name, param_spec in params.items():
+            # 复制参数规格，移除内部 required 字段
+            prop = {k: v for k, v in param_spec.items() if k != "required"}
+            properties[param_name] = prop
+            
+            # 检查是否为必填
+            if param_spec.get("required", False):
+                required.append(param_name)
+        
+        res = {
+            "type": "object",
+            "properties": properties,
+        }
+        if required:
+            res['required'] = required
+
+        return res
+ 
     async def __call__(self, **kwargs) -> ToolResult:
         """Make tool callable"""
         if not self.validate_permissions():
