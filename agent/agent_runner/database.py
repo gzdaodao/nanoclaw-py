@@ -393,7 +393,8 @@ class ConversationDatabase:
         self,
         session_id: str,
         before_timestamp: Optional[datetime] = None,
-        role: Optional[str] = None
+        role: Optional[str] = None,
+        except_role: Optional[str] = None
     ) -> int:
         """
         Delete messages from a session
@@ -416,6 +417,11 @@ class ConversationDatabase:
             if role:
                 query += " AND role = ?"
                 params.append(role)
+
+            if except_role:
+                query += " AND role != ?"
+                params.append(except_role)
+
             
             cursor.execute(query, params)
             deleted = cursor.rowcount

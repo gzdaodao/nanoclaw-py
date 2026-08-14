@@ -231,7 +231,7 @@ class Agent(ABC):
                 # Delete messages from database
                 self.context.db.delete_messages(
                     self.context.session_id,
-                    role=None if not keep_system else "system"
+                    except_role=None if not keep_system else "system"
                 )
             except Exception as e:
                 logger.debug(f"Warning: Failed to delete messages from database: {e}")
