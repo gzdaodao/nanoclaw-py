@@ -18,10 +18,10 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 
-# 安装 Playwright 依赖
-RUN pip install playwright && \
-    playwright install chromium && \
-    playwright install-deps
+## 安装 Playwright 依赖
+#RUN pip install playwright && \
+#    playwright install chromium && \
+#    playwright install-deps
 
 # 复制依赖文件
 COPY requirements.txt .

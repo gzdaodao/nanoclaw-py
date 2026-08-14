@@ -333,13 +333,13 @@ When given a task:
                 self._stats["completion_tokens"] += usage.get("completion_tokens", 0)
             
             # Process response and handle tool calls
-            content, tool_results = await self._process_response(response_data)
+            contents, tool_results = await self._process_response(response_data)
             
             # Update tool call stats
             self._stats["tool_calls"] += len(tool_results)
             
             return AgentResponse(
-                content=content,
+                content='\n'.join(contents),
                 session_id=response_data.get("id", ""),
                 metadata={
                     "model": response_data.get("model", self.model),
@@ -448,6 +448,7 @@ When given a task:
         choice = response_data['choices'][0]
         message = choice.get('message', {})
         content = message.get('content', "") or ""
+        contents = [content]
         tool_results = []
         
         # Convert tool_calls to serializable format if present
@@ -479,29 +480,30 @@ When given a task:
             ))
         
         # If there were tool calls, get final response
-        api_messages = self._build_messages([])
-        response_data = await self._make_api_request(api_messages)
+        if message.get('tool_calls', []):
+            api_messages = self._build_messages([])
+            response_data = await self._make_api_request(api_messages)
         
         
-        #if response_data.get('choices'):
-        #    choice = response_data['choices'][0]
-        #    message = choice.get('message', {})
-        #    tcontent = message.get('content', "") or ""
-        #    logger.debug(f'tcontent: {tcontent}')
-        #    content += tcontent
-        #    
-        #    # Update token stats
-        #    if "usage" in response_data:
-        #        usage = response_data["usage"]
-        #        self._stats["total_tokens"] += usage.get("total_tokens", 0)
-        #        self._stats["prompt_tokens"] += usage.get("prompt_tokens", 0)
-        #        self._stats["completion_tokens"] += usage.get("completion_tokens", 0)
+            #if response_data.get('choices'):
+            #    choice = response_data['choices'][0]
+            #    message = choice.get('message', {})
+            #    tcontent = message.get('content', "") or ""
+            #    logger.debug(f'tcontent: {tcontent}')
+            #    content += tcontent
+            #    
+            #    # Update token stats
+            #    if "usage" in response_data:
+            #        usage = response_data["usage"]
+            #        self._stats["total_tokens"] += usage.get("total_tokens", 0)
+            #        self._stats["prompt_tokens"] += usage.get("prompt_tokens", 0)
+            #        self._stats["completion_tokens"] += usage.get("completion_tokens", 0)
     
-        tcontent, ttool_results = await self._process_response(response_data)
-        content += tcontent
-        tool_results.extend(ttool_results)
+            tcontents, ttool_results = await self._process_response(response_data)
+            contents.extend(tcontents)
+            tool_results.extend(ttool_results)
 
-        return content, tool_results
+        return contents, tool_results
     
     async def _handle_tool_call(self, tool_call: Dict[str, Any]) -> Dict[str, Any]:
         """Handle a single tool call"""
