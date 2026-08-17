@@ -243,7 +243,9 @@ class NanoClawApplication:
                 folder=register_folder,
                 trigger=register_trigger,
                 added_at=datetime.now().isoformat(),
-                requiresTrigger=register_requires_trigger
+                requiresTrigger=register_requires_trigger,
+                preferred_channel=channel,
+                allowed_channels=[channel] if channel else None,
             )
             self.register_group(chat_id, group)
             logger.info(f"Group auto-registered: {chat_id} as {register_folder}")

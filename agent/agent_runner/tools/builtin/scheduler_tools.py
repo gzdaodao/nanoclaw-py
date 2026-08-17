@@ -72,7 +72,7 @@ class ScheduleTaskTool(BaseTool):
             
             # 使用 send_request 发送到 messages 目录（主系统监听）
             await self.context.ipc_client.send_request(
-                json.dumps(message),
+                message,
             )
             
             logger.info(f"Schedule task request sent: {schedule_type}:{schedule_value} for {target_jid}")
@@ -132,7 +132,7 @@ class ListTasksTool(BaseTool):
             
             # 发送请求
             await self.context.ipc_client.send_request(
-                json.dumps(message),
+                message,
             )
             
             logger.info(f"List tasks request sent for {self.context.group_folder}")
@@ -184,7 +184,7 @@ class CancelTaskTool(BaseTool):
             
             # 发送请求
             await self.context.ipc_client.send_request(
-                json.dumps(message),
+                message,
             )
             
             logger.info(f"Cancel task request sent for {task_id}")
@@ -236,7 +236,7 @@ class PauseTaskTool(BaseTool):
             
             # 发送请求
             await self.context.ipc_client.send_request(
-                json.dumps(message),
+                message,
             )
             
             logger.info(f"Pause task request sent for {task_id}")
@@ -288,7 +288,7 @@ class ResumeTaskTool(BaseTool):
             
             # 发送请求
             await self.context.ipc_client.send_request(
-                json.dumps(message),
+                message,
             )
             
             logger.info(f"Resume task request sent for {task_id}")

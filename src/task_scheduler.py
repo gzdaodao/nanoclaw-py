@@ -12,7 +12,7 @@ from .db import db_session, get_db
 from .group_folder import GroupFolderResolver
 from .container_runner import ContainerRunner, ContainerOutput
 from .group_queue import GroupQueue
-from .snapshot import SnapshotWriter  # 假设有这个类
+from .snapshot import SnapshotWriter
 
 
 class SchedulerDeps:
@@ -96,14 +96,12 @@ class TaskRunner:
             logger.error(f'Task {task.id}: {error}')
             self._log_task_run(task.id, start_time, 'error', error=error)
             return
-                
-        # Get channel info for this task
-        channel_info = None
-        if group.preferred_channel:
-            channels = self.deps.get_channels_info()
-            channel_info = next((ch for ch in channels if ch['name'] == group.preferred_channel), None)
- 
-        # Update tasks snapshot
+        
+        # Session handling
+        sessions = self.deps.get_sessions()
+        session_id = sessions.get(task.group_folder) if task.context_mode == 'group' else None
+        
+        # Update tasks snapshot - 只保留必要字段，移除 preferred_channel 和 allowed_channels
         with db_session() as db:
             all_tasks = db.get_all_tasks()
             is_main = task.group_folder == MAIN_GROUP_FOLDER
@@ -117,19 +115,12 @@ class TaskRunner:
                     'schedule_type': t.schedule_type.value if hasattr(t.schedule_type, 'value') else t.schedule_type,
                     'schedule_value': t.schedule_value,
                     'status': t.status.value if hasattr(t.status, 'value') else t.status,
-                    'next_run': t.next_run,
-                    'preferred_channel': group.preferred_channel,
-                    'allowed_channels': group.allowed_channels
-
+                    'next_run': t.next_run
                 } for t in all_tasks]
             )
         
         result_text = None
         error_text = None
-        
-        # Session handling
-        sessions = self.deps.get_sessions()
-        session_id = sessions.get(task.group_folder) if task.context_mode == 'group' else None
         
         # Task close delay
         TASK_CLOSE_DELAY_MS = 10000
@@ -154,11 +145,11 @@ class TaskRunner:
                     'isMain': task.group_folder == MAIN_GROUP_FOLDER,
                     'isScheduledTask': True,
                     'assistantName': ASSISTANT_NAME,
-                    'channelInfo': channel_info,
+                    'channelInfo': None,  # 不需要 preferred_channel
                     'availableChannels': self.deps.get_channels_info()
                 },
                 lambda proc, name: self.deps.on_process(task.chat_id, proc, name, task.group_folder),
-                self._create_output_handler(task, group, result_text, error_text, close_timer, schedule_close)
+                self._create_output_handler(task, result_text, error_text, close_timer, schedule_close)
             )
             
             if close_timer:
@@ -192,7 +183,7 @@ class TaskRunner:
             result_summary = f'Error: {error_text}' if error_text else (result_text[:200] if result_text else 'Completed')
             db.update_task_after_run(task.id, next_run, result_summary)
     
-    def _create_output_handler(self, task, group, result_text, error_text, close_timer, schedule_close):
+    def _create_output_handler(self, task, result_text, error_text, close_timer, schedule_close):
         """Create output handler for container"""
                 
         async def on_stream(output: ContainerOutput):
@@ -201,14 +192,12 @@ class TaskRunner:
             if output.result:
                 result_text = output.result
                 
-                # 确定使用哪个通道发送
-                channel_name = group.preferred_channel if group.preferred_channel else None
-                
-                # 发送消息
+                # 直接使用 task.chat_id 发送，系统会自动路由到正确的频道
+                # 不需要 preferred_channel
                 await self.deps.send_message(
-                    task.chat_id, 
+                    task.chat_id,  # 任务创建时的 JID，包含频道信息
                     output.result,
-                    channel_name
+                    None  # 让系统根据 chat_id 自动路由
                 )
                 
                 if not close_timer:

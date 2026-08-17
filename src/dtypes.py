@@ -40,6 +40,8 @@ class RegisteredGroup:
     added_at: str
     containerConfig: Optional[ContainerConfig] = None
     requiresTrigger: Optional[bool] = None
+    preferred_channel: Optional[str] = None
+    allowed_channels: Optional[List[str]] = None
 
 @dataclass
 class NewMessage:

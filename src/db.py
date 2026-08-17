@@ -578,7 +578,12 @@ class Database:
                 'requiresTrigger': None if data['requires_trigger'] is None else bool(data['requires_trigger'])
             }
             if data['container_config']:
+                config_data = json.loads(data['container_config'])
                 result['containerConfig'] = json.loads(data['container_config'])
+                if 'preferred_channel' in config_data:
+                    result['preferred_channel'] = config_data['preferred_channel']
+                if 'allowed_channels' in config_data:
+                    result['allowed_channels'] = config_data['allowed_channels']
             return result
     
     def set_registered_group(self, jid: str, group: RegisteredGroup) -> None:
@@ -609,10 +614,16 @@ class Database:
                     continue
                 
                 container_config = None
+                preferred_channel = None
+                allowed_channels = None
+
                 if data['container_config']:
                     config_data = json.loads(data['container_config'])
                     from dtypes import ContainerConfig
                     container_config = ContainerConfig(**config_data)
+                    if 'preferred_channel' in config_data:
+                        preferred_channel = config_data['preferred_channel']
+
                 
                 result[data['jid']] = RegisteredGroup(
                     name=data['name'],
@@ -620,7 +631,9 @@ class Database:
                     trigger=data['trigger_pattern'],
                     added_at=data['added_at'],
                     containerConfig=container_config,
-                    requiresTrigger=None if data['requires_trigger'] is None else bool(data['requires_trigger'])
+                    requiresTrigger=None if data['requires_trigger'] is None else bool(data['requires_trigger']),
+                    preferred_channel=preferred_channel,
+                    allowed_channels=allowed_channels,
                 )
             return result
     
