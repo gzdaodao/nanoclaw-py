@@ -50,22 +50,33 @@ class SendMessageTool(BaseTool):
             if not self.context.ipc_client:
                 return ToolResult.fail("IPC client not available")
             
-            # Send message via IPC
-            await self.context.ipc_client.send_request({
-                "type": "send_message",
-                "jid": jid,
+            # 构建消息
+            message = {
+                "type": "message",
+                "chatJid": jid,
                 "text": text,
                 "channel": channel,
                 "format": format
-            })
+            }
+            
+            # 使用 send_output 发送消息
+            await self.context.ipc_client.send_output(
+                json.dumps(message) if isinstance(message, dict) else message,
+                chat_id=jid,
+                command_id="send_message"
+            )
+            
+            logger.info(f"Message sent to {jid} via channel {channel or 'auto'}")
             
             return ToolResult.ok({
+                "status": "sent",
                 "jid": jid,
                 "channel": channel or "auto",
                 "format": format
             })
             
         except Exception as e:
+            logger.error(f"Failed to send message: {e}")
             return ToolResult.fail(f"Failed to send message: {e}")
 
 
@@ -95,21 +106,30 @@ class GetChannelInfoTool(BaseTool):
             if not self.context.ipc_client:
                 return ToolResult.fail("IPC client not available")
             
-            if channel_name:
-                # Get specific channel
-                result = await self.context.ipc_client.request({
-                    "type": "get_channel",
-                    "name": channel_name
-                })
-            else:
-                # Get all channels
-                result = await self.context.ipc_client.request({
-                    "type": "get_channels"
-                })
+            # 构建请求
+            message = {
+                "type": "get_channels",
+                "channel_name": channel_name,
+                "chatJid": self.context.chat_id
+            }
             
-            return ToolResult.ok(result)
+            # 发送请求到主系统
+            await self.context.ipc_client.send_output(
+                json.dumps(message),
+                chat_id=self.context.chat_id,
+                command_id="get_channels"
+            )
+            
+            logger.info(f"Channel info request sent for {channel_name or 'all channels'}")
+            
+            return ToolResult.ok({
+                "status": "requested",
+                "message": f"Channel info request sent. Check response in chat.",
+                "channel": channel_name or "all"
+            })
             
         except Exception as e:
+            logger.error(f"Failed to get channel info: {e}")
             return ToolResult.fail(f"Failed to get channel info: {e}")
 
 
@@ -144,15 +164,32 @@ class ListGroupsTool(BaseTool):
             if not self.context.ipc_client:
                 return ToolResult.fail("IPC client not available")
             
-            result = await self.context.ipc_client.request({
+            # 构建请求
+            message = {
                 "type": "list_groups",
+                "filter": filter,
+                "channel": channel,
+                "chatJid": self.context.chat_id
+            }
+            
+            # 发送请求到主系统
+            await self.context.ipc_client.send_output(
+                json.dumps(message),
+                chat_id=self.context.chat_id,
+                command_id="list_groups"
+            )
+            
+            logger.info(f"List groups request sent for filter: {filter}, channel: {channel}")
+            
+            return ToolResult.ok({
+                "status": "requested",
+                "message": "Group list request sent. Check response in chat.",
                 "filter": filter,
                 "channel": channel
             })
             
-            return ToolResult.ok(result)
-            
         except Exception as e:
+            logger.error(f"Failed to list groups: {e}")
             return ToolResult.fail(f"Failed to list groups: {e}")
 
 

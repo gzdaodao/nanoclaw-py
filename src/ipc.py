@@ -261,21 +261,56 @@ class IPCProcessor:
                     if is_main or target_folder == source_group:
                         self.task_scheduler.create_task(data, target_folder, source_group, is_main)
                         success = True
+
+            elif task_type == 'list_tasks':
+                # 列出任务
+                with db_session() as db:
+                    tasks = db.get_tasks_for_group(source_group) if not is_main else db.get_all_tasks()
+                    # 通过 send_message 返回结果
+                    tasks_text = "📋 **Scheduled Tasks:**\n\n"
+                    if tasks:
+                        for t in tasks[:10]:
+                            status_icon = "🟢" if t.status == "active" else "⏸️" if t.status == "paused" else "✅"
+                            tasks_text += f"{status_icon} **{t.id}**\n"
+                            tasks_text += f"  📝 {t.prompt[:50]}...\n"
+                            tasks_text += f"  ⏰ {t.schedule_type}: {t.schedule_value}\n"
+                            tasks_text += f"  📅 Next: {t.next_run or 'N/A'}\n\n"
+                        if len(tasks) > 10:
+                            tasks_text += f"... and {len(tasks) - 10} more tasks"
+                    else:
+                        tasks_text += "No tasks found."
+                    
+                    await self.deps.send_message(data.get('chatJid'), tasks_text, None)
+                    success = True
             
             elif task_type == 'pause_task':
                 task_id = data.get('taskId')
                 if task_id:
                     success = self.task_scheduler.pause_task(task_id, source_group, is_main)
+                    if success:
+                        await self.deps.send_message(data.get('chatJid'), f"⏸️ Task {task_id} paused.", None)
+                    else:
+                        await self.deps.send_message(data.get('chatJid'), f"❌ Failed to pause task {task_id}.", None)
             
             elif task_type == 'resume_task':
                 task_id = data.get('taskId')
                 if task_id:
                     success = self.task_scheduler.resume_task(task_id, source_group, is_main)
+                    if success:
+                        await self.deps.send_message(data.get('chatJid'), f"▶️ Task {task_id} resumed.", None)
+                    else:
+                        await self.deps.send_message(data.get('chatJid'), f"❌ Failed to resume task {task_id}.", None)
+           
             
             elif task_type == 'cancel_task':
                 task_id = data.get('taskId')
                 if task_id:
                     success = self.task_scheduler.cancel_task(task_id, source_group, is_main)
+                    if success:
+                        await self.deps.send_message(data.get('chatJid'), f"▶️ Task {task_id} cancelled.", None)
+                    else:
+                        await self.deps.send_message(data.get('chatJid'), f"❌ Failed to cancel task {task_id}.", None)
+ 
             
             elif task_type == 'refresh_groups':
                 await self._handle_refresh_groups(source_group, is_main)
@@ -283,9 +318,45 @@ class IPCProcessor:
             
             elif task_type == 'register_group':
                 success = self.group_registration.register_group(data, source_group, is_main)
- 
+
+
+            elif task_type == 'list_groups':
+                # 列出群组
+                groups = self.deps.get_available_groups()
+                groups_text = "📋 **Available Groups:**\n\n"
+                if groups:
+                    for g in groups[:20]:
+                        status = "✅" if g['isRegistered'] else "⬜"
+                        groups_text += f"{status} **{g['name']}**\n"
+                        groups_text += f"  📱 JID: {g['jid']}\n"
+                        groups_text += f"  📅 Last: {g['lastActivity'][:16] if g.get('lastActivity') else 'N/A'}\n\n"
+                    if len(groups) > 20:
+                        groups_text += f"... and {len(groups) - 20} more groups"
+                else:
+                    groups_text += "No groups found."
+                
+                await self.deps.send_message(data.get('chatJid'), groups_text, None)
+                success = True
+            
             elif task_type == 'get_channels':
-                success = await self._handle_get_channels(source_group, is_main)
+                # 获取通道信息
+                channels = self.deps.get_channels_info()
+                channels_text = "📡 **Available Channels:**\n\n"
+                if channels:
+                    for ch in channels:
+                        status = "🟢" if ch['connected'] else "🔴"
+                        channels_text += f"{status} **{ch['name']}** ({ch['type']})\n"
+                        if ch.get('features'):
+                            features = [f"✅ {k}" for k, v in ch['features'].items() if v]
+                            if features:
+                                channels_text += f"  Features: {', '.join(features)}\n"
+                        channels_text += "\n"
+                else:
+                    channels_text += "No channels available."
+                
+                await self.deps.send_message(data.get('chatJid'), channels_text, None)
+                success = True
+ 
             else:
                 logger.error(f'Not support type: {task_type} IPC file {file}')
             
