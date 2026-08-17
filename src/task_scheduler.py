@@ -10,7 +10,7 @@ from .logger import logger
 from .dtypes import RegisteredGroup, ScheduledTask, TaskRunLog
 from .db import db_session, get_db
 from .group_folder import GroupFolderResolver
-from .container_runner import ContainerRunner, ContainerOutput
+from .container_runner import ContainerRunner, ContainerOutput, ContainerInput
 from .group_queue import GroupQueue
 from .snapshot import SnapshotWriter
 
@@ -137,7 +137,7 @@ class TaskRunner:
         try:
             output = await self.container_runner.run_agent(
                 group,
-                {
+                ContainerInput(**{
                     'prompt': task.prompt,
                     'sessionId': session_id,
                     'groupFolder': task.group_folder,
@@ -147,7 +147,7 @@ class TaskRunner:
                     'assistantName': ASSISTANT_NAME,
                     'channelInfo': None,  # 不需要 preferred_channel
                     'availableChannels': self.deps.get_channels_info()
-                },
+                }),
                 lambda proc, name: self.deps.on_process(task.chat_id, proc, name, task.group_folder),
                 self._create_output_handler(task, result_text, error_text, close_timer, schedule_close)
             )

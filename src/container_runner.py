@@ -35,6 +35,9 @@ class ContainerInput:
     isScheduledTask: bool = False
     assistantName: Optional[str] = None
     secrets: Optional[Dict[str, str]] = None
+    configs: Optional[Dict[str, str]] = None
+    channelInfo: Optional[Dict[str, Any]] = None 
+    availableChannels: Optional[List[Dict[str, Any]]] = None
 
 @dataclass
 class ContainerOutput:
