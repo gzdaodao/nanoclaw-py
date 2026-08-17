@@ -1,6 +1,9 @@
 # task_scheduler.py
 import asyncio
+import json
+import os
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Optional, List, Callable, Awaitable, Any
 
 from croniter import croniter
@@ -68,10 +71,16 @@ class TaskRunner:
         self.folder_resolver = GroupFolderResolver()
         self.next_run_calculator = NextRunCalculator()
         self.snapshot_writer = SnapshotWriter(self.folder_resolver)
+        self._running_tasks: Dict[str, asyncio.Task] = {}
     
     async def run_task(self, task: ScheduledTask) -> None:
         """Run a scheduled task"""
         start_time = datetime.now()
+        
+        # 防止重复执行同一个任务
+        if task.id in self._running_tasks and not self._running_tasks[task.id].done():
+            logger.debug(f'Task {task.id} is already running, skipping')
+            return
         
         # Validate group folder
         try:
@@ -79,7 +88,6 @@ class TaskRunner:
             group_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             error = str(e)
-            # Stop retry churn for malformed rows
             with db_session() as db:
                 db.update_task(task.id, status='paused')
             logger.error(f'Task {task.id} has invalid group folder: {error}')
@@ -101,7 +109,7 @@ class TaskRunner:
         sessions = self.deps.get_sessions()
         session_id = sessions.get(task.group_folder) if task.context_mode == 'group' else None
         
-        # Update tasks snapshot - 只保留必要字段，移除 preferred_channel 和 allowed_channels
+        # Update tasks snapshot
         with db_session() as db:
             all_tasks = db.get_all_tasks()
             is_main = task.group_folder == MAIN_GROUP_FOLDER
@@ -135,32 +143,60 @@ class TaskRunner:
             self.deps.queue.close_stdin(task.chat_id)
         
         try:
-            output = await self.container_runner.run_agent(
-                group,
-                ContainerInput(**{
-                    'prompt': task.prompt,
-                    'sessionId': session_id,
-                    'groupFolder': task.group_folder,
-                    'chatJid': task.chat_id,
-                    'isMain': task.group_folder == MAIN_GROUP_FOLDER,
-                    'isScheduledTask': True,
-                    'assistantName': ASSISTANT_NAME,
-                    'channelInfo': None,  # 不需要 preferred_channel
-                    'availableChannels': self.deps.get_channels_info()
-                }),
-                lambda proc, name: self.deps.on_process(task.chat_id, proc, name, task.group_folder),
-                self._create_output_handler(task, result_text, error_text, close_timer, schedule_close)
+            # 构建任务消息（和普通消息格式一致，Agent 能识别）
+            task_message = {
+                'type': 'message',
+                'chatJid': task.chat_id,
+                'text': task.prompt,
+                'isScheduledTask': True,
+                'task_id': task.id,
+                'context_mode': task.context_mode
+            }
+            
+            # 使用 queue.send_message 发送到 Agent（和 main.py 一致）
+            # 如果有活跃容器，直接发送；如果没有，enqueue_message_check 会启动容器
+            logger.info(f'Sending task {task.id} to agent...')
+            
+            # 先尝试使用 queue.send_message（如果容器已存在）
+            message_sent = self.deps.queue.send_message(
+                task.chat_id, 
+                json.dumps(task_message)
             )
             
-            if close_timer:
-                close_timer.cancel()
-            
-            if output.status == 'error':
-                error_text = output.error or 'Unknown error'
-            elif output.result:
-                result_text = output.result
-            
-            logger.info(f'Task {task.id} completed in {(datetime.now() - start_time).total_seconds() * 1000:.0f}ms')
+            if message_sent:
+                logger.info(f'Task {task.id} sent to active container')
+                # 等待容器处理完成（通过 on_output 回调）
+                # 这里需要等待一段时间让容器处理
+                await asyncio.sleep(2)  # 给容器一些时间处理
+            else:
+                # 没有活跃容器，需要启动容器
+                logger.info(f'No active container for task {task.id}, starting...')
+                
+                # 使用 ContainerInput 启动容器（和 main.py 的 _run_agent 一致）
+                output = await self.container_runner.run_agent(
+                    group,
+                    ContainerInput(
+                        prompt=task.prompt,
+                        sessionId=session_id,
+                        groupFolder=task.group_folder,
+                        chatJid=task.chat_id,
+                        isMain=task.group_folder == MAIN_GROUP_FOLDER,
+                        isScheduledTask=True,
+                        assistantName=ASSISTANT_NAME
+                    ),
+                    lambda proc, name: self.deps.on_process(task.chat_id, proc, name, task.group_folder),
+                    self._create_output_handler(task, result_text, error_text, close_timer, schedule_close)
+                )
+                
+                if close_timer:
+                    close_timer.cancel()
+                
+                if output.status == 'error':
+                    error_text = output.error or 'Unknown error'
+                elif output.result:
+                    result_text = output.result
+                
+                logger.info(f'Task {task.id} container completed in {(datetime.now() - start_time).total_seconds() * 1000:.0f}ms')
             
         except Exception as e:
             if close_timer:
@@ -182,6 +218,10 @@ class TaskRunner:
             next_run = self.next_run_calculator.calculate(task)
             result_summary = f'Error: {error_text}' if error_text else (result_text[:200] if result_text else 'Completed')
             db.update_task_after_run(task.id, next_run, result_summary)
+        
+        # 从运行中任务列表中移除
+        if task.id in self._running_tasks:
+            del self._running_tasks[task.id]
     
     def _create_output_handler(self, task, result_text, error_text, close_timer, schedule_close):
         """Create output handler for container"""
@@ -193,11 +233,10 @@ class TaskRunner:
                 result_text = output.result
                 
                 # 直接使用 task.chat_id 发送，系统会自动路由到正确的频道
-                # 不需要 preferred_channel
                 await self.deps.send_message(
-                    task.chat_id,  # 任务创建时的 JID，包含频道信息
+                    task.chat_id,
                     output.result,
-                    None  # 让系统根据 chat_id 自动路由
+                    None
                 )
                 
                 if not close_timer:
