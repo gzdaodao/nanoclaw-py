@@ -70,11 +70,9 @@ class ScheduleTaskTool(BaseTool):
                 "chatJid": self.context.chat_id
             }
             
-            # 使用 send_output 发送到 messages 目录（主系统监听）
-            await self.context.ipc_client.send_output(
+            # 使用 send_request 发送到 messages 目录（主系统监听）
+            await self.context.ipc_client.send_request(
                 json.dumps(message),
-                chat_id=self.context.chat_id,
-                command_id="schedule"
             )
             
             logger.info(f"Schedule task request sent: {schedule_type}:{schedule_value} for {target_jid}")
@@ -133,10 +131,8 @@ class ListTasksTool(BaseTool):
             }
             
             # 发送请求
-            await self.context.ipc_client.send_output(
+            await self.context.ipc_client.send_request(
                 json.dumps(message),
-                chat_id=self.context.chat_id,
-                command_id="list_tasks"
             )
             
             logger.info(f"List tasks request sent for {self.context.group_folder}")
@@ -187,10 +183,8 @@ class CancelTaskTool(BaseTool):
             }
             
             # 发送请求
-            await self.context.ipc_client.send_output(
+            await self.context.ipc_client.send_request(
                 json.dumps(message),
-                chat_id=self.context.chat_id,
-                command_id="cancel_task"
             )
             
             logger.info(f"Cancel task request sent for {task_id}")
@@ -241,10 +235,8 @@ class PauseTaskTool(BaseTool):
             }
             
             # 发送请求
-            await self.context.ipc_client.send_output(
+            await self.context.ipc_client.send_request(
                 json.dumps(message),
-                chat_id=self.context.chat_id,
-                command_id="pause_task"
             )
             
             logger.info(f"Pause task request sent for {task_id}")
@@ -295,10 +287,8 @@ class ResumeTaskTool(BaseTool):
             }
             
             # 发送请求
-            await self.context.ipc_client.send_output(
+            await self.context.ipc_client.send_request(
                 json.dumps(message),
-                chat_id=self.context.chat_id,
-                command_id="resume_task"
             )
             
             logger.info(f"Resume task request sent for {task_id}")

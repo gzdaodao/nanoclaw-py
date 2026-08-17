@@ -23,6 +23,8 @@ class TaskSchedulerIPC:
     
     def create_task(self, data: dict, target_folder: str, source_group: str, is_main: bool) -> Optional[str]:
         """Create a new scheduled task"""
+        logger.info(f'create_task: data:{data} target_folder: {target_folder} source_group:{source_group} is_main:{is_main}')
+
         required = ['prompt', 'schedule_type', 'schedule_value', 'targetJid']
         if not all(k in data for k in required):
             logger.warn('Invalid schedule_task request: missing fields')
@@ -245,6 +247,7 @@ class IPCProcessor:
     
     async def process_file(self, file: Path, source_group: str, is_main: bool) -> None:
         """Process a single IPC file"""
+        logger.info(f'process_file: {file}')
         try:
             data = json.loads(file.read_text())
             target_group = self.deps.registered_groups().get(data.get('chatJid'))
@@ -476,15 +479,15 @@ class IpcWatcher:
                                          registered_groups: Dict[str, RegisteredGroup]) -> None:
         """Process message and task directories for a group"""
         messages_dir = self.ipc_base_dir / source_group / 'messages'
-        tasks_dir = self.ipc_base_dir / source_group / 'tasks'
+        #tasks_dir = self.ipc_base_dir / source_group / 'tasks'
         
         # Process messages
         if messages_dir.exists():
             await self._process_directory(messages_dir, source_group, is_main)
         
         # Process tasks
-        if tasks_dir.exists():
-            await self._process_directory(tasks_dir, source_group, is_main)
+        #if tasks_dir.exists():
+        #    await self._process_directory(tasks_dir, source_group, is_main)
     
     async def _process_directory(self, directory: Path, source_group: str, is_main: bool) -> None:
         """Process all files in a directory"""
