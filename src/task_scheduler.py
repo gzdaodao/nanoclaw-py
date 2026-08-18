@@ -75,6 +75,7 @@ class TaskRunner:
     
     async def run_task(self, task: ScheduledTask) -> None:
         """Run a scheduled task"""
+        logger.info(f'[RUN_TASK] START: task {task.id} for group {task.group_folder}')
         start_time = datetime.now()
         
         # 防止重复执行同一个任务

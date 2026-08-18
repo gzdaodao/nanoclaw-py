@@ -52,6 +52,7 @@ class OpenAIAgent(Agent):
         context: Optional[AgentContext] = None,
         temperature: float = 0.5,
         max_tokens: int = 2000000000,
+        max_compress_tokens: int = 1000000,
         system_prompt: Optional[str] = None,
         tool_categories: Optional[List[str]] = None,
         plugin_dirs: Optional[List[Path]] = None,
@@ -273,7 +274,8 @@ When given a task:
             "model": self.model,
             "messages": messages,
             "temperature": self.temperature,
-            "stream": stream
+            "stream": stream,
+            'context_management': [{"type": "compaction", "compact_threshold": self.max_compress_tokens}],
         }
         
         if self.max_tokens and self.max_tokens != 2000000000:
