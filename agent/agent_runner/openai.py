@@ -13,6 +13,7 @@ import aiohttp
 from aiohttp import ClientTimeout, ClientSession
 
 from .base import Agent, AgentContext, AgentMessage, AgentResponse, AgentFactory
+from .base import CtxExceededError, BalanceError
 from .logger import logger
 
 
@@ -36,8 +37,6 @@ from .tools.builtin.memory_tools import MemoryToolsPlugin
 from .ipc_client import IpcClient
 
 from traceback import format_exc
-
-
 
 @AgentFactory.register("openai")
 class OpenAIAgent(Agent):
@@ -296,6 +295,22 @@ When given a task:
                     ct = await response.text()
                     response.raise_for_status()
                     return await response.json()
+            except aiohttp.ClientResponseError as e:
+                try:
+                    error_data = await response.json()
+                    error = error_data.get('error', {})
+                    error_code = error.get('code')
+                    error_message = error.get('message', 'Unknown error')
+                except Exception as e:
+                    raise e
+
+                status = response.status
+                if status == 400 and error_code == 'context_length_exceeded':
+                    raise CtxExceededError(error_message)
+                elif status == 429:
+                    if error_code in ['insufficient_quota', 'credit_balance_exhausted', 'quota_exceeded']:
+                        raise BalanceError(error_message)
+
             except aiohttp.ClientError as e:
                 last_exception = e
                 logger.error(f"API request failed (attempt {attempt + 1}/{self.max_retries}): {e} {ct}")

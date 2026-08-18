@@ -16,6 +16,22 @@ from .database import ConversationDatabase, get_default_database, init_default_d
 from .logger import logger
 
 
+class CtxExceededError(Exception):
+    """
+    上下文超长
+    """
+    def __init__(self, msg):
+        super(CtxExceededError, self).__init__(msg)
+
+
+class BalanceError(Exception):
+    """
+    账号余额不足
+    """
+    def __init__(self, msg):
+        super(BalanceError, self).__init__(msg)
+
+
 @dataclass
 class AgentContext:
     """Agent execution context"""
@@ -176,7 +192,22 @@ class Agent(ABC):
                 content='Started new session.',
             )
 
-        return await self.process_messages([message], **kwargs)
+        try:
+            res = await self.process_messages([message], **kwargs)
+        except BalanceError as e:
+            return AgentResponse(
+                content='AI account balance insufficient',
+            )
+        except CtxExceededError as e:
+            self.clear_history()
+            return AgentResponse(
+                content='AI session context is too long, automatically reset session.',
+            )
+
+
+
+
+        return res
     
     @abstractmethod
     async def stream_response(
