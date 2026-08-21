@@ -146,7 +146,7 @@ class TaskRunner:
                 sender_id='system',
                 sender_name='Scheduler',
                 content=f'[Task: {task.id}] {task.prompt}',
-                timestamp=datetime.now().isoformat(),
+                timestamp=datetime.now(),
                 is_from_me=True,
                 is_bot_message=False
             )
@@ -154,7 +154,7 @@ class TaskRunner:
             with db_session() as db:
                 db.store_message(task_msg)
             
-            logger.error(f'Task {task.id} Message stored.')
+            logger.info(f'Task {task.id} Message stored.')
             
         except Exception as e:
             if close_timer:
