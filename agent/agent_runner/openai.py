@@ -66,6 +66,7 @@ class OpenAIAgent(Agent):
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.max_compress_tokens = max_compress_tokens
         self.custom_system_prompt = system_prompt
         self.tool_categories = tool_categories or [
             "general", "filesystem", "communication", "system", "skills",

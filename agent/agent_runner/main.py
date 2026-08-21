@@ -150,6 +150,7 @@ class AgentRunner:
                 # Check for input files
                 files = sorted(input_dir.glob('*.json'))
                 
+                #logger.info(f"Starting process files:{files}")
                 for file in files:
                     if file.name in processed_files:
                         continue

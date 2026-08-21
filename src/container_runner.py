@@ -534,7 +534,7 @@ class ContainerRunner:
     async def _handle_timeout(self, group, container_name, input_data, duration, 
                              returncode, had_streaming_output, new_session_id):
         """Handle container timeout"""
-        group_dir = self.folder_resolver.resolve_group_folder(group.folder)
+        group_dir = self.mount_builder.folder_resolver.resolve_group_folder(group.folder)
         logger_instance = ContainerLogger(group_dir / 'logs')
         
         logger_instance.write_log(

@@ -16,8 +16,13 @@ class ScheduleTaskTool(BaseTool):
     def metadata(self) -> ToolMetadata:
         return ToolMetadata(
             name="schedule_task",
-            description="Schedule a task to run later",
+            description="Schedule a task to run later. The task will be executed in the current chat context.",
             parameters={
+                "id": {
+                    "type": "string",
+                    "description": "Unique Task ID",
+                    "required": True
+                },
                 "prompt": {
                     "type": "string",
                     "description": "Task prompt/description",
@@ -26,17 +31,12 @@ class ScheduleTaskTool(BaseTool):
                 "schedule_type": {
                     "type": "string",
                     "enum": ["cron", "interval", "once"],
-                    "description": "Type of schedule",
+                    "description": "Type of schedule, cron: use cron expression to schedule, interval: Repeat execution at intervals, once: Execute once at schedule_value isotime",
                     "required": True
                 },
                 "schedule_value": {
                     "type": "string",
                     "description": "Schedule value (cron expression, interval ms, or timestamp)",
-                    "required": True
-                },
-                "target_jid": {
-                    "type": "string",
-                    "description": "Target chat JID for results",
                     "required": True
                 },
                 "context_mode": {
@@ -51,35 +51,37 @@ class ScheduleTaskTool(BaseTool):
             version="1.0.0"
         )
     
-    async def execute(self, prompt: str, schedule_type: str, schedule_value: str, 
-                     target_jid: str, context_mode: str = "isolated") -> ToolResult:
-        """Execute schedule task"""
+    async def execute(self, id: str, prompt: str, schedule_type: str, schedule_value: str, 
+                     context_mode: str = "isolated") -> ToolResult:
+        """Execute schedule task - target_jid is automatically taken from session context"""
         try:
             if not self.context.ipc_client:
                 return ToolResult.fail("IPC client not available")
             
+            # 🟢 从上下文获取 chat_id，不让 Agent 自己指定
+            target_jid = self.context.chat_id
+            
             # 构建消息
             message = {
                 "type": "schedule_task",
+                "id": id,
                 "prompt": prompt,
                 "schedule_type": schedule_type,
                 "schedule_value": schedule_value,
-                "targetJid": target_jid,
+                "targetJid": target_jid,  # 从上下文获取
                 "context_mode": context_mode,
                 "source_group": self.context.group_folder,
                 "chatJid": self.context.chat_id
             }
             
             # 使用 send_request 发送到 messages 目录（主系统监听）
-            await self.context.ipc_client.send_request(
-                message,
-            )
+            await self.context.ipc_client.send_request(message)
             
             logger.info(f"Schedule task request sent: {schedule_type}:{schedule_value} for {target_jid}")
             
             return ToolResult.ok({
                 "status": "submitted",
-                "message": f"Task scheduled for {target_jid}",
+                "message": f"Task scheduled for current chat",
                 "schedule": f"{schedule_type}: {schedule_value}",
                 "prompt": prompt[:100] + "..." if len(prompt) > 100 else prompt
             })
@@ -96,7 +98,7 @@ class ListTasksTool(BaseTool):
     def metadata(self) -> ToolMetadata:
         return ToolMetadata(
             name="list_tasks",
-            description="List scheduled tasks for current group",
+            description="List scheduled tasks for current chat",
             parameters={
                 "status": {
                     "type": "string",
@@ -116,12 +118,12 @@ class ListTasksTool(BaseTool):
         )
     
     async def execute(self, status: str = "active", limit: int = 50) -> ToolResult:
-        """Execute list tasks"""
+        """Execute list tasks - automatically uses current chat context"""
         try:
             if not self.context.ipc_client:
                 return ToolResult.fail("IPC client not available")
             
-            # 构建消息
+            # 🟢 从上下文获取 group_folder
             message = {
                 "type": "list_tasks",
                 "status": status,
@@ -131,9 +133,7 @@ class ListTasksTool(BaseTool):
             }
             
             # 发送请求
-            await self.context.ipc_client.send_request(
-                message,
-            )
+            await self.context.ipc_client.send_request(message)
             
             logger.info(f"List tasks request sent for {self.context.group_folder}")
             
@@ -174,7 +174,7 @@ class CancelTaskTool(BaseTool):
             if not self.context.ipc_client:
                 return ToolResult.fail("IPC client not available")
             
-            # 构建消息
+            # 🟢 从上下文获取 group_folder
             message = {
                 "type": "cancel_task",
                 "taskId": task_id,
@@ -183,9 +183,7 @@ class CancelTaskTool(BaseTool):
             }
             
             # 发送请求
-            await self.context.ipc_client.send_request(
-                message,
-            )
+            await self.context.ipc_client.send_request(message)
             
             logger.info(f"Cancel task request sent for {task_id}")
             
@@ -226,7 +224,7 @@ class PauseTaskTool(BaseTool):
             if not self.context.ipc_client:
                 return ToolResult.fail("IPC client not available")
             
-            # 构建消息
+            # 🟢 从上下文获取 group_folder
             message = {
                 "type": "pause_task",
                 "taskId": task_id,
@@ -235,9 +233,7 @@ class PauseTaskTool(BaseTool):
             }
             
             # 发送请求
-            await self.context.ipc_client.send_request(
-                message,
-            )
+            await self.context.ipc_client.send_request(message)
             
             logger.info(f"Pause task request sent for {task_id}")
             
@@ -278,7 +274,7 @@ class ResumeTaskTool(BaseTool):
             if not self.context.ipc_client:
                 return ToolResult.fail("IPC client not available")
             
-            # 构建消息
+            # 🟢 从上下文获取 group_folder
             message = {
                 "type": "resume_task",
                 "taskId": task_id,
@@ -287,9 +283,7 @@ class ResumeTaskTool(BaseTool):
             }
             
             # 发送请求
-            await self.context.ipc_client.send_request(
-                message,
-            )
+            await self.context.ipc_client.send_request(message)
             
             logger.info(f"Resume task request sent for {task_id}")
             

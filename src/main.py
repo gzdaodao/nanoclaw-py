@@ -560,9 +560,12 @@ class NanoClawApplication:
             try:
                 jids = list(self.registered_groups.keys())
                 for jid in jids:
+                    #last_ts = self.last_agent_timestamp.get(jid, '0')
+                    #logger.debug(f"Checking JID {jid} with last_ts={last_ts}")
                     messages, new_timestamp = self.db.get_new_messages(
                         [jid], self.last_agent_timestamp.get(jid, '0'), ASSISTANT_NAME
                     )
+                    #logger.debug(f"Found {len(messages)} new messages for {jid}")
                     
                     if messages:
                         logger.info(f'New messages: {len(messages)}')

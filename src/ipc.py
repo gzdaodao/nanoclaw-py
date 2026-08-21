@@ -10,7 +10,7 @@ from croniter import croniter
 
 from .config import DATA_DIR, IPC_POLL_INTERVAL, MAIN_GROUP_FOLDER
 from .logger import logger
-from .dtypes import RegisteredGroup, ScheduleType, TaskStatus, ScheduledTask
+from .dtypes import RegisteredGroup, ScheduleType, TaskStatus, ScheduledTask, NewMessage
 from .group_folder import GroupFolderValidator
 from .db import db_session, Database
 
@@ -19,7 +19,7 @@ class TaskSchedulerIPC:
     """Handle task scheduling operations from IPC"""
     
     def __init__(self):
-        self.db = Database()  # Will use connection pooling
+        self.db = Database()
     
     def create_task(self, data: dict, target_folder: str, source_group: str, is_main: bool) -> Optional[str]:
         """Create a new scheduled task"""
@@ -64,7 +64,7 @@ class TaskSchedulerIPC:
         logger.info(f'Task created via IPC: {task_id} for {target_folder} (mode={context_mode})')
         return task_id
     
-    def _calculate_next_run(self, schedule_type: str, schedule_value: str) -> Optional[str]:
+    def _calculate_next_run(self, schedule_type: str, schedule_value: str, raise_error: bool = True) -> Optional[str]:
         """Calculate next run time based on schedule"""
         try:
             if schedule_type == 'cron':
@@ -82,6 +82,8 @@ class TaskSchedulerIPC:
                 return scheduled.isoformat()
         except Exception as e:
             logger.warn(f'Invalid schedule {schedule_type}={schedule_value}: {e}')
+            if raise_error:
+                raise e
             return None
     
     def pause_task(self, task_id: str, task_folder: str, is_main: bool) -> bool:
@@ -145,7 +147,6 @@ class GroupRegistrationIPC:
             logger.warn(f'Invalid register_group request: unsafe folder {data["folder"]}')
             return False
         
-        # 验证通道配置
         preferred_channel = data.get('preferred_channel')
         allowed_channels = data.get('allowed_channels', [])
         
@@ -179,7 +180,6 @@ class GroupRegistrationIPC:
         return True
 
 
-
 class MessageIPC:
     """Handle message operations from IPC"""
     
@@ -189,18 +189,14 @@ class MessageIPC:
     async def process_message(self, data: dict, target_group: Optional[RegisteredGroup], 
                              source_group: str, is_main: bool) -> bool:
         """Process a message via IPC"""
-        #logger.error('process_message: 1')
         if data.get('type') != 'message' or not data.get('chatJid') or not data.get('text'):
             logger.error(f'process_message data error:{data}')
             return False
         
-        #logger.error('process_message: 2')
         target_jid = data['chatJid']
-        channel_name = data.get('channel')  # 可选，指定通道
+        channel_name = data.get('channel')
         
-        # 权限检查：非主组只能给自己组的聊天发消息
         if not is_main and (not target_group or target_group.folder != source_group):
-            # 检查是否在允许的通道列表中
             if target_group and target_group.allowed_channels:
                 if channel_name not in target_group.allowed_channels:
                     logger.warn(f'Unauthorized IPC message attempt: {target_jid} from {source_group}')
@@ -209,7 +205,6 @@ class MessageIPC:
                 logger.warn(f'Unauthorized IPC message attempt: {target_jid} from {source_group}')
                 return False
         
-        #logger.error('process_message: 3')
         await self.send_message(target_jid, data['text'], channel_name)
         logger.info(f'IPC message sent: {target_jid} from {source_group}' + 
                    (f' via {channel_name}' if channel_name else ''))
@@ -219,13 +214,13 @@ class MessageIPC:
 class IpcDeps:
     def __init__(
         self,
-        send_message: Callable[[str, str, Optional[str]], Awaitable[None]],  # 添加 channel 参数
+        send_message: Callable[[str, str, Optional[str]], Awaitable[None]],
         registered_groups: Callable[[], Dict[str, RegisteredGroup]],
         register_group: Callable[[str, RegisteredGroup], None],
-        sync_group_metadata: Callable[[bool, Optional[str]], Awaitable[None]],  # 添加 channel 参数
+        sync_group_metadata: Callable[[bool, Optional[str]], Awaitable[None]],
         get_available_groups: Callable[[], List[Dict[str, Any]]],
         write_groups_snapshot: Callable[[str, bool, List[Dict[str, Any]], Set[str]], None],
-        get_channels_info: Callable[[], List[Dict[str, Any]]]  # 新增：获取通道信息
+        get_channels_info: Callable[[], List[Dict[str, Any]]]
     ):
         self.send_message = send_message
         self.registered_groups = registered_groups
@@ -245,6 +240,25 @@ class IPCProcessor:
         self.group_registration = GroupRegistrationIPC(deps.register_group, deps.get_channels_info)
         self.message_handler = MessageIPC(deps.send_message)
     
+    def _store_message(self, chat_id: str, text: str, sender_name: str = "System") -> None:
+        """Store message to database, will be processed by _message_loop"""
+        try:
+            msg = NewMessage(
+                id=f'ipc_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:6]}',
+                chat_id=chat_id,
+                sender_id='system',
+                sender_name=sender_name,
+                content=text,
+                timestamp=datetime.now(),
+                is_from_me=True,
+                is_bot_message=False
+            )
+            with db_session() as db:
+                db.store_message(msg)
+            logger.debug(f'IPC response stored in DB for {chat_id}')
+        except Exception as e:
+            logger.error(f'Failed to store IPC response message: {e}')
+    
     async def process_file(self, file: Path, source_group: str, is_main: bool) -> None:
         """Process a single IPC file"""
         logger.info(f'process_file: {file}')
@@ -254,120 +268,124 @@ class IPCProcessor:
             
             task_type = data.get('type')
             success = False
+            result_text = None
+            target_jid = data.get('chatJid')
             
             if task_type == 'message':
                 success = await self.message_handler.process_message(data, target_group, source_group, is_main)
-            
-            elif task_type == 'schedule_task':
-                if target_group:
-                    target_folder = target_group.folder
-                    if is_main or target_folder == source_group:
-                        self.task_scheduler.create_task(data, target_folder, source_group, is_main)
+            else:
+                try:
+                    if task_type == 'schedule_task':
+                        if target_group:
+                            target_folder = target_group.folder
+                            if is_main or target_folder == source_group:
+                                task_id = self.task_scheduler.create_task(data, target_folder, source_group, is_main)
+                                success = bool(task_id)
+                                if task_id:
+                                    result_text = (
+                                        f"Task scheduled successfully!\n\n"
+                                        f"Task ID: {task_id}\n"
+                                        f"Schedule: {data.get('schedule_type')}: {data.get('schedule_value')}\n"
+                                        f"Prompt: {data.get('prompt')[:100]}..."
+                                    )
+
+                    elif task_type == 'list_tasks':
+                        with db_session() as db:
+                            status = data.get('status', 'active')
+                            limit = data.get('limit', 10)
+                            tasks = db.get_tasks_for_group(source_group, status, limit)
+                            if tasks:
+                                lines = ["Scheduled Tasks:\n"]
+                                for t in tasks:
+                                    status_map = {
+                                        'active': '[Active]',
+                                        'paused': '[Paused]',
+                                        'completed': '[Completed]'
+                                    }
+                                    status_str = status_map.get(str(t.status), f'[{t.status}]')
+                                    lines.append(f"{status_str} {t.id}")
+                                    lines.append(f"  Prompt: {t.prompt[:50]}...")
+                                    lines.append(f"  Schedule: {t.schedule_type}: {t.schedule_value}")
+                                    lines.append(f"  Next: {t.next_run or 'N/A'}\n")
+                                result_text = "\n".join(lines)
+                            else:
+                                result_text = "No scheduled tasks found."
+                            success = True
+                    
+                    elif task_type == 'pause_task':
+                        task_id = data.get('taskId')
+                        if task_id:
+                            success = self.task_scheduler.pause_task(task_id, source_group, is_main)
+                            result_text = f"Task {task_id} paused." if success else f"Failed to pause task {task_id}."
+                    
+                    elif task_type == 'resume_task':
+                        task_id = data.get('taskId')
+                        if task_id:
+                            success = self.task_scheduler.resume_task(task_id, source_group, is_main)
+                            result_text = f"Task {task_id} resumed." if success else f"Failed to resume task {task_id}."
+                    
+                    elif task_type == 'cancel_task':
+                        task_id = data.get('taskId')
+                        if task_id:
+                            success = self.task_scheduler.cancel_task(task_id, source_group, is_main)
+                            result_text = f"Task {task_id} cancelled." if success else f"Failed to cancel task {task_id}."
+                    
+                    elif task_type == 'refresh_groups':
+                        await self._handle_refresh_groups(source_group, is_main)
+                        success = True
+                        result_text = "Group metadata refreshed."
+
+                    elif task_type == 'register_group':
+                        success = self.group_registration.register_group(data, source_group, is_main)
+                        result_text = "Group registered successfully!" if success else "Failed to register group."
+
+                    elif task_type == 'list_groups':
+                        groups = self.deps.get_available_groups()
+                        if groups:
+                            lines = ["Available Groups:\n"]
+                            for g in groups[:20]:
+                                status = "[Registered]" if g['isRegistered'] else "[Not Registered]"
+                                lines.append(f"{status} {g['name']}")
+                                lines.append(f"  JID: {g['jid']}")
+                                lines.append(f"  Last Activity: {g['lastActivity'][:16] if g.get('lastActivity') else 'N/A'}\n")
+                            if len(groups) > 20:
+                                lines.append(f"... and {len(groups) - 20} more groups")
+                            result_text = "\n".join(lines)
+                        else:
+                            result_text = "No groups found."
+                        success = True
+                    
+                    elif task_type == 'get_channels':
+                        channels = self.deps.get_channels_info()
+                        if channels:
+                            lines = ["Available Channels:\n"]
+                            for ch in channels:
+                                status = "[Connected]" if ch['connected'] else "[Disconnected]"
+                                lines.append(f"{status} {ch['name']} ({ch['type']})")
+                                if ch.get('features'):
+                                    features = [k for k, v in ch['features'].items() if v]
+                                    if features:
+                                        lines.append(f"  Features: {', '.join(features)}")
+                                lines.append("")
+                            result_text = "\n".join(lines)
+                        else:
+                            result_text = "No channels available."
                         success = True
 
-            elif task_type == 'list_tasks':
-                # 列出任务
-                with db_session() as db:
-                    tasks = db.get_tasks_for_group(source_group) if not is_main else db.get_all_tasks()
-                    # 通过 send_message 返回结果
-                    tasks_text = "📋 **Scheduled Tasks:**\n\n"
-                    if tasks:
-                        for t in tasks[:10]:
-                            status_icon = "🟢" if t.status == "active" else "⏸️" if t.status == "paused" else "✅"
-                            tasks_text += f"{status_icon} **{t.id}**\n"
-                            tasks_text += f"  📝 {t.prompt[:50]}...\n"
-                            tasks_text += f"  ⏰ {t.schedule_type}: {t.schedule_value}\n"
-                            tasks_text += f"  📅 Next: {t.next_run or 'N/A'}\n\n"
-                        if len(tasks) > 10:
-                            tasks_text += f"... and {len(tasks) - 10} more tasks"
+
                     else:
-                        tasks_text += "No tasks found."
-                    
-                    await self.deps.send_message(data.get('chatJid'), tasks_text, None)
-                    success = True
-            
-            elif task_type == 'pause_task':
-                task_id = data.get('taskId')
-                if task_id:
-                    success = self.task_scheduler.pause_task(task_id, source_group, is_main)
-                    if success:
-                        await self.deps.send_message(data.get('chatJid'), f"⏸️ Task {task_id} paused.", None)
-                    else:
-                        await self.deps.send_message(data.get('chatJid'), f"❌ Failed to pause task {task_id}.", None)
-            
-            elif task_type == 'resume_task':
-                task_id = data.get('taskId')
-                if task_id:
-                    success = self.task_scheduler.resume_task(task_id, source_group, is_main)
-                    if success:
-                        await self.deps.send_message(data.get('chatJid'), f"▶️ Task {task_id} resumed.", None)
-                    else:
-                        await self.deps.send_message(data.get('chatJid'), f"❌ Failed to resume task {task_id}.", None)
-           
-            
-            elif task_type == 'cancel_task':
-                task_id = data.get('taskId')
-                if task_id:
-                    success = self.task_scheduler.cancel_task(task_id, source_group, is_main)
-                    if success:
-                        await self.deps.send_message(data.get('chatJid'), f"▶️ Task {task_id} cancelled.", None)
-                    else:
-                        await self.deps.send_message(data.get('chatJid'), f"❌ Failed to cancel task {task_id}.", None)
- 
-            
-            elif task_type == 'refresh_groups':
-                await self._handle_refresh_groups(source_group, is_main)
-                success = True
-            
-            elif task_type == 'register_group':
-                success = self.group_registration.register_group(data, source_group, is_main)
+                        logger.error(f'Not support type: {task_type} IPC file {file}')
 
 
-            elif task_type == 'list_groups':
-                # 列出群组
-                groups = self.deps.get_available_groups()
-                groups_text = "📋 **Available Groups:**\n\n"
-                if groups:
-                    for g in groups[:20]:
-                        status = "✅" if g['isRegistered'] else "⬜"
-                        groups_text += f"{status} **{g['name']}**\n"
-                        groups_text += f"  📱 JID: {g['jid']}\n"
-                        groups_text += f"  📅 Last: {g['lastActivity'][:16] if g.get('lastActivity') else 'N/A'}\n\n"
-                    if len(groups) > 20:
-                        groups_text += f"... and {len(groups) - 20} more groups"
-                else:
-                    groups_text += "No groups found."
-                
-                await self.deps.send_message(data.get('chatJid'), groups_text, None)
-                success = True
+                except Exception as e:
+                    result_text = f'Process message:{data}\nErrors: {e}' 
             
-            elif task_type == 'get_channels':
-                # 获取通道信息
-                channels = self.deps.get_channels_info()
-                channels_text = "📡 **Available Channels:**\n\n"
-                if channels:
-                    for ch in channels:
-                        status = "🟢" if ch['connected'] else "🔴"
-                        channels_text += f"{status} **{ch['name']}** ({ch['type']})\n"
-                        if ch.get('features'):
-                            features = [f"✅ {k}" for k, v in ch['features'].items() if v]
-                            if features:
-                                channels_text += f"  Features: {', '.join(features)}\n"
-                        channels_text += "\n"
-                else:
-                    channels_text += "No channels available."
-                
-                await self.deps.send_message(data.get('chatJid'), channels_text, None)
-                success = True
- 
-            else:
-                logger.error(f'Not support type: {task_type} IPC file {file}')
+            if result_text and target_jid:
+                self._store_message(target_jid, result_text)
             
-            # Delete successful file
             if success:
                 file.unlink()
             else:
-                # Move to errors if not successful
                 logger.error(f'Error handling IPC file {file}')
                 self._move_to_error(file, source_group, "processing_failed")
             
@@ -377,7 +395,6 @@ class IPCProcessor:
         except Exception as e:
             logger.error(f'Error processing IPC file {file}: {e}')
             self._move_to_error(file, source_group, "exception")
-
     
     async def _handle_get_channels(self, source_group: str, is_main: bool) -> bool:
         """Handle get channels request"""
@@ -387,7 +404,6 @@ class IPCProcessor:
         
         channels_info = self.deps.get_channels_info()
         
-        # 写入响应文件
         response_dir = Path(DATA_DIR) / 'ipc' / source_group / 'responses'
         response_dir.mkdir(parents=True, exist_ok=True)
         
@@ -459,7 +475,6 @@ class IpcWatcher:
     
     async def _scan_once(self) -> None:
         """Perform one scan of IPC directories"""
-        # Get group folders
         group_folders = []
         try:
             for item in self.ipc_base_dir.iterdir():
@@ -479,20 +494,14 @@ class IpcWatcher:
                                          registered_groups: Dict[str, RegisteredGroup]) -> None:
         """Process message and task directories for a group"""
         messages_dir = self.ipc_base_dir / source_group / 'messages'
-        #tasks_dir = self.ipc_base_dir / source_group / 'tasks'
         
-        # Process messages
         if messages_dir.exists():
             await self._process_directory(messages_dir, source_group, is_main)
-        
-        # Process tasks
-        #if tasks_dir.exists():
-        #    await self._process_directory(tasks_dir, source_group, is_main)
     
     async def _process_directory(self, directory: Path, source_group: str, is_main: bool) -> None:
         """Process all files in a directory"""
         try:
-            for file in sorted(directory.glob('*.json')):  # Process in order
+            for file in sorted(directory.glob('*.json')):
                 await self.processor.process_file(file, source_group, is_main)
         except Exception as e:
             logger.error(f'Error reading directory {directory} for {source_group}: {e}')
