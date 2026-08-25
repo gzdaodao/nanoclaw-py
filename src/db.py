@@ -444,10 +444,17 @@ class Database:
     def get_tasks_for_group(self, group_folder: str, status: str = 'active', limit: int = 10) -> List[ScheduledTask]:
         """Get tasks for a group"""
         with self.cursor() as cursor:
-            cursor.execute(
-                'SELECT * FROM scheduled_tasks WHERE group_folder = ? and status in ? ORDER BY created_at DESC limit ?',
-                (group_folder, status, limit)
-            )
+            if status == 'all':
+                cursor.execute(
+                    'SELECT * FROM scheduled_tasks WHERE group_folder = ? ORDER BY created_at DESC limit ?',
+                    (group_folder, limit)
+                )
+
+            else:
+                cursor.execute(
+                    'SELECT * FROM scheduled_tasks WHERE group_folder = ? and status = ? ORDER BY created_at DESC limit ?',
+                    (group_folder, status, limit)
+                )
             return [self._row_to_task(dict(row)) for row in cursor.fetchall()]
     
     def get_all_tasks(self) -> List[ScheduledTask]:
