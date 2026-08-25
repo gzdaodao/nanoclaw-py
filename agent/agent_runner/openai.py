@@ -27,6 +27,12 @@ from .skills import (
     get_skill_detail, get_all_skills, get_skill
 )
 
+# Simplified mcp_servers
+from .mcp_servers import (
+    load_all_mcp_servers, get_mcp_servers_summary, search_mcp_servers,
+    get_mcp_server_detail, get_all_mcp_servers, get_mcp_server
+)
+
 from .tools.builtin.file_tools import FileToolsPlugin
 from .tools.builtin.communication_tools import CommunicationToolsPlugin
 from .tools.builtin.system_tools import SystemToolsPlugin
@@ -35,6 +41,8 @@ from .tools.builtin.memory_tools import MemoryToolsPlugin
 
 # IPC
 from .ipc_client import IpcClient
+# MCP
+from .mcp_client import MCPClientFactory, MCPClient
 
 from traceback import format_exc
 
@@ -69,7 +77,7 @@ class OpenAIAgent(Agent):
         self.max_compress_tokens = max_compress_tokens
         self.custom_system_prompt = system_prompt
         self.tool_categories = tool_categories or [
-            "general", "filesystem", "communication", "system", "skills",
+            "general", "filesystem", "communication", "system", "skills", "mcp_servers",
         ]
         self.request_timeout = request_timeout
         self.max_retries = max_retries
@@ -90,6 +98,10 @@ class OpenAIAgent(Agent):
         self.tool_context = self._create_tool_context()
         self.plugins: Dict[str, ToolPlugin] = {}
         self.tool_handlers: Dict[str, Callable] = {}
+
+        self.mcp_clients: Dict[str, MCPClient] = {}
+        self.mcp_tools: Dict[str, Dict] = {}  # tool_name -> {client_url, tool_spec}
+ 
                
         # State
         self._session_id = context.session_id if context else ""
@@ -163,6 +175,16 @@ class OpenAIAgent(Agent):
             self._stats["skills_loaded"] = skill_count
         except Exception as e:
             logger.error(f"Failed to load skills: {e}")
+
+ 
+        # Load all mcp_servers
+        try:
+            mcp_server_count = load_all_mcp_servers()
+            logger.info(f"Loaded {mcp_server_count} mcp_servers from /workspace/group/mcp_servers")
+            self._stats["mcp_servers_loaded"] = mcp_server_count
+        except Exception as e:
+            logger.error(f"Failed to load mcp_servers: {e}")
+
         
         # Load built-in tool plugins
         await self._load_tool_plugins()
@@ -173,6 +195,7 @@ class OpenAIAgent(Agent):
         await super().initialize()
         
         logger.info(f"Agent {self.name} initialized with {len(self.tool_handlers)} tools and {skill_count} skills")
+        logger.info(f"Agent {self.name} initialized with {len(self.tool_handlers)} tools and {mcp_server_count} mcp_servers")
        
     async def _load_tool_plugins(self):
         """Load tool plugins"""
@@ -197,6 +220,9 @@ class OpenAIAgent(Agent):
         
         # Get skills summary
         skills_summary = get_skills_summary()
+         
+        # Get mcp_servers summary
+        mcp_servers_summary = get_mcp_servers_summary()
         
         # Build prompt
         prompt = f"""You are {self.context.assistant_name}, an AI assistant with access to various skills and tools.
@@ -204,6 +230,7 @@ You are in group: {self.context.group_folder}
 Main group: {self.context.is_main}
 
 {skills_summary}
+{mcp_servers_summary}
 
 """
         
@@ -627,3 +654,38 @@ When given a task:
             "plugins_loaded": len(self.plugins),
             "uptime_seconds": (datetime.now() - self._last_activity).total_seconds() if self._last_activity else 0
         }
+
+
+
+    
+    async def connect_mcp_server(self, server_url: str, api_key: str = None):
+        """Connect to an MCP server"""
+        client = await MCPClientFactory.get_or_create_client(
+            server_url=server_url,
+            api_key=api_key
+        )
+        self.mcp_clients[server_url] = client
+        
+        # Get tools from server
+        tools = await client.list_tools()
+        for tool in tools:
+            tool_name = tool["name"]
+            self.mcp_tools[tool_name] = {
+                "client_url": server_url,
+                "spec": tool
+            }
+            logger.info(f"Registered MCP tool: {tool_name} from {server_url}")
+        
+        return tools
+    
+    async def call_mcp_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
+        """Call an MCP tool"""
+        if tool_name not in self.mcp_tools:
+            raise ValueError(f"Tool not found: {tool_name}")
+        
+        tool_info = self.mcp_tools[tool_name]
+        client = self.mcp_clients[tool_info["client_url"]]
+        
+        return await client.call_tool(tool_name, arguments)
+
+

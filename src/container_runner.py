@@ -104,8 +104,11 @@ class VolumeMountBuilder:
         
         # Sync skills
         self._sync_skills(group_dir)
+         
+        # Sync mcp_servers
+        self._sync_mcp_servers(group_dir)
         
-               
+       
         # Per-group IPC namespace
         group_ipc_dir = self.folder_resolver.resolve_group_ipc_path(group.folder)
         for subdir in ['messages', 'tasks', 'input']:
@@ -148,6 +151,22 @@ class VolumeMountBuilder:
             if not skill_dir.is_dir():
                 continue
             dst_dir = skills_dst / skill_dir.name
+            if not dst_dir.exists():
+                shutil.copytree(skill_dir, dst_dir)
+     
+    def _sync_mcp_servers(self, group_dir: Path) -> None:
+        """Sync mcp_servers to group sessions directory"""
+        mcp_servers_dst = group_dir / 'mcp_servers'
+        mcp_servers_dst.mkdir(parents=True, exist_ok=True)
+ 
+        mcp_servers_src = self.groups_dir / 'global' / 'mcp_servers'
+        if not mcp_servers_src.exists():
+            return
+       
+        for skill_dir in mcp_servers_src.iterdir():
+            if not skill_dir.is_dir():
+                continue
+            dst_dir = mcp_servers_dst / skill_dir.name
             if not dst_dir.exists():
                 shutil.copytree(skill_dir, dst_dir)
   
