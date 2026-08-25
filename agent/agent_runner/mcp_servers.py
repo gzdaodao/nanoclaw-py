@@ -15,12 +15,51 @@ from .logger import logger
 
 
 class MCPTool(BaseTool):
-    def __init__(self, server, name, context: Optional[ToolContext] = None):
+    def __init__(self, server, tool_spec, context: Optional[ToolContext] = None):
         super(MCPTool, self).__init__(context=context)
         self.server = server
-        self.name = name
-        self.description = ''
-        self.parameters = {}
+        self._tool_spec = tool_spec
+        self.name = tool_spec.get('name')
+        self.description = tool_spec.get('description', f'MCP tool: {self.name}')
+    
+        # 获取 inputSchema 并转换为 OpenAI 格式
+        input_schema = tool_spec.get('inputSchema', {})
+        self.parameters = self._convert_schema_to_openai(input_schema)
+
+
+    def _convert_schema_to_openai(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        将 MCP 的 JSON Schema 转换为 OpenAI function 参数格式
+        
+        MCP 格式:
+        {
+            "type": "object",
+            "properties": {
+                "param1": {"type": "string", "description": "..."},
+                "param2": {"type": "number", "description": "..."}
+            },
+            "required": ["param1"]
+        }
+        
+        OpenAI 格式 (相同结构):
+        {
+            "type": "object",
+            "properties": {
+                "param1": {"type": "string", "description": "..."},
+                "param2": {"type": "number", "description": "..."}
+            },
+            "required": ["param1"]
+        }
+        """
+        if not schema:
+            return {"type": "object", "properties": {}, "required": []}
+        
+        # 直接使用 schema，确保必要字段存在
+        return {
+            "type": schema.get("type", "object"),
+            "properties": schema.get("properties", {}),
+            "required": schema.get("required", [])
+        }
 
 
     @property
@@ -59,13 +98,6 @@ class MCPTool(BaseTool):
             logger.error(f"MCP tool {self.name} execution error: {e}")
             return ToolResult.fail(str(e))
  
-
-
-    def _load_spec(self):
-        """
-        加载工具规范
-        """
-        pass
 
    
 
@@ -117,7 +149,7 @@ class MCPServer:
             if not tool_name:
                 continue
                        
-            self.tool_handlers[tool_name] = MCPTool(self, tool_name)
+            self.tool_handlers[tool_name] = MCPTool(self, tool_spec)
             
             logger.info(f"Registered MCP tool: {tool_name} from {self.name}")
         
