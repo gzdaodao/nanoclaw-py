@@ -13,7 +13,7 @@ import aiohttp
 from aiohttp import ClientTimeout, ClientSession
 
 from .base import Agent, AgentContext, AgentMessage, AgentResponse, AgentFactory
-from .base import CtxExceededError, BalanceError
+from .base import CtxExceededError, BalanceError, APIError
 from .logger import logger
 
 
@@ -323,13 +323,14 @@ When given a task:
                     response.raise_for_status()
                     return await response.json()
             except aiohttp.ClientResponseError as e:
+                error_message = str(e)
                 try:
                     error_data = await response.json()
                     error = error_data.get('error', {})
                     error_code = error.get('code')
                     error_message = error.get('message', 'Unknown error')
                 except Exception as e:
-                    raise e
+                    raise APIError(error_message)
 
                 status = response.status
                 if status == 400 and error_code == 'context_length_exceeded':
@@ -393,6 +394,21 @@ When given a task:
                 },
                 tool_results=tool_results
             )
+
+        except BalanceError as e:
+            return AgentResponse(
+                content='AI account balance insufficient',
+            )
+        except CtxExceededError as e:
+            self.clear_history()
+            return AgentResponse(
+                content='AI session context is too long, automatically reset session.',
+            )
+        except APIError as e:
+            return AgentResponse(
+                content=f'AI API Error: {str(e)}',
+            )
+
             
         except Exception as e:
             logger.error(f"Error processing messages: {e}\n{traceback.format_exc()}")

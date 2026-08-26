@@ -31,6 +31,14 @@ class BalanceError(Exception):
     def __init__(self, msg):
         super(BalanceError, self).__init__(msg)
 
+class APIError(Exception):
+    """
+    API调用错误
+    """
+    def __init__(self, msg):
+        super(APIError, self).__init__(msg)
+
+
 
 @dataclass
 class AgentContext:
@@ -203,6 +211,11 @@ class Agent(ABC):
             return AgentResponse(
                 content='AI session context is too long, automatically reset session.',
             )
+        except APIError as e:
+            return AgentResponse(
+                content=f'AI API Error: {str(e)}',
+            )
+
 
 
 

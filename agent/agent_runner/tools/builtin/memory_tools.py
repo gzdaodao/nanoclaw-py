@@ -62,7 +62,27 @@ class VectorMemory:
                     "updated_at": row[4]
                 }
         return None
+  
+    def get_all(self, limit=10) -> Optional[Dict]:
+        """Get memory by key"""
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT key, value, tags, created_at, updated_at FROM memories limit ?",
+                (limit,)
+            ).fetchall()
+           
+ 
+            return [{
+                "key": r[0],
+                "value": r[1],
+                "tags": json.loads(r[2]),
+                "created_at": r[3],
+                "updated_at": r[4]
+            } for r in rows]
     
+
+        return None
+   
     def search(self, query: str, limit: int = 10) -> List[Dict]:
         """Simple text search"""
         with sqlite3.connect(self.db_path) as conn:
@@ -252,6 +272,45 @@ class DeleteMemoryTool(BaseTool):
             return ToolResult.fail(f"Failed to get memory: {e}")
 
 
+class GetAllMemoryTool(BaseTool):
+    """Tool to get all memory"""
+    
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            name="get_all_memory",
+            description="Get all long-term memory",
+            parameters={
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 100
+                }
+            },
+            category="memory",
+            required_permissions=["memory:read"],
+            version="1.0.0"
+        )
+    
+    async def execute(self, limit: int = 10) -> ToolResult:
+        """Execute get all memory"""
+        try:
+            if not self.context.memory_client:
+                return ToolResult.fail("Memory client not available")
+            
+            results = self.context.memory_client.get_all(limit)
+            
+            return ToolResult.ok({
+                "results": results,
+                "count": len(results)
+            })
+            
+        except Exception as e:
+            return ToolResult.fail(f"Failed to get all memory: {e}")
+
+
 class MemoryToolsPlugin(ToolPlugin):
     """Plugin providing memory tools"""
     
@@ -283,5 +342,6 @@ class MemoryToolsPlugin(ToolPlugin):
         self.register_tool(DeleteMemoryTool(context))
         self.register_tool(SearchMemoryTool(context))
         self.register_tool(GetMemoryTool(context))
+        self.register_tool(GetAllMemoryTool(context))
         
         logger.info(f"Memory tools plugin initialized with {len(self._tools)} tools")
