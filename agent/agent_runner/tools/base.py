@@ -8,7 +8,7 @@ import importlib
 import pkgutil
 import inspect
 from pathlib import Path
-from .base import Agent
+from ..base import Agent
 
 
 @dataclass
