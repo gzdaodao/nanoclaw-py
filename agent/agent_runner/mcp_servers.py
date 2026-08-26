@@ -101,7 +101,7 @@ class MCPTool(BaseTool):
 
    
 
-class MCPServer:
+class McpServer:
     def __init__(self, uuid, name, url, path,
             description,
             api_key=None,
@@ -122,8 +122,8 @@ class MCPServer:
         self.timeout = timeout
         self.max_retries = max_retries
         self.auto_load = auto_load
-        self.tool_handlers = []
-        self._load_tools()
+        self.tool_handlers = {}
+        await self._load_tools()
 
     async def _connect(self):
         # Create or get client
@@ -137,7 +137,7 @@ class MCPServer:
 
     async def _load_tools(self):
         client = await self._connect()
-        self.tool_handlers = []
+        self.tool_handlers = {}
                
         # Get tools from server
         tools = await client.list_tools()
@@ -155,20 +155,20 @@ class MCPServer:
         
 
 
-class MCPServerLoader:
+class McpServerLoader:
     """极简MCP服务加载器 - 每个MCP服务独立索引"""
     
     def __init__(self, mcp_servers_root: Path = Path("/workspace/group/mcp_servers")):
         self.mcp_servers_root = mcp_servers_root
-        self.mcp_servers: Dict[str, MCPServer] = {}  # uuid -> MCPServer
-        self.mcp_servers_by_name: Dict[str, MCPServer] = {}  # name -> MCPServer
+        self.mcp_servers: Dict[str, McpServer] = {}  # uuid -> McpServer
+        self.mcp_servers_by_name: Dict[str, McpServer] = {}  # name -> McpServer
         self._loaded = False
         self._load_time: Optional[datetime] = None
     
     def load_all_mcp_servers(self) -> int:
         """加载所有MCP服务 - 扫描每个子目录的 config.json"""
         if not self.mcp_servers_root.exists():
-            logger.warning(f"MCPServers directory not found: {self.mcp_servers_root}")
+            logger.warning(f"McpServers directory not found: {self.mcp_servers_root}")
             return 0
         
         self.mcp_servers.clear()
@@ -187,7 +187,7 @@ class MCPServerLoader:
             
             try:
                 data = json.loads(config_file.read_text(encoding='utf-8'))
-                data.upate({
+                data.update({
                     'path': mcp_server_dir,
                     })
                 
@@ -196,7 +196,7 @@ class MCPServerLoader:
                     logger.warning(f"Invalid config.json in {mcp_server_dir}: missing required fields")
                     continue
                 
-                mcp_server = MCPServer(
+                mcp_server = McpServer(
                     **data
                 )
                 
@@ -229,7 +229,7 @@ class MCPServerLoader:
         # 检查MCP服务名称是否已存在
         name = kwargs['name']
         if name in self.mcp_servers_by_name:
-            logger.warning(f"MCPServer with name '{name}' already exists")
+            logger.warning(f"McpServer with name '{name}' already exists")
             return None
         
         # 生成 UUID
@@ -240,7 +240,7 @@ class MCPServerLoader:
         try:
             mcp_server_dir.mkdir(parents=True, exist_ok=False)
         except FileExistsError:
-            logger.error(f"MCPServer directory already exists: {mcp_server_dir}")
+            logger.error(f"McpServer directory already exists: {mcp_server_dir}")
             return None
         except Exception as e:
             logger.error(f"Failed to create mcp_server directory: {e}")
@@ -269,11 +269,11 @@ class MCPServerLoader:
                 pass
             return None
                
-        # 创建 MCPServer 对象并加入缓存
+        # 创建 McpServer 对象并加入缓存
         config_data.update({
             "path": mcp_server_dir,
             })
-        mcp_server = MCPServer(
+        mcp_server = McpServer(
             **config_data
         )
         
@@ -297,7 +297,7 @@ class MCPServerLoader:
         # 获取MCP服务
         mcp_server = self.get_mcp_server(identifier)
         if not mcp_server:
-            logger.warning(f"MCPServer not found: {identifier}")
+            logger.warning(f"McpServer not found: {identifier}")
             return None
                
         try:
@@ -316,7 +316,7 @@ class MCPServerLoader:
                 logger.info(f"Deleted mcp_server directory: {mcp_server.path}")
                 mcp_server_info["deleted"] = True
             else:
-                logger.warning(f"MCPServer directory does not exist: {mcp_server.path}")
+                logger.warning(f"McpServer directory does not exist: {mcp_server.path}")
                 mcp_server_info["deleted"] = False
                 mcp_server_info["warning"] = "Directory did not exist"
             
@@ -324,14 +324,14 @@ class MCPServerLoader:
             self.mcp_servers.pop(mcp_server.uuid, None)
             self.mcp_servers_by_name.pop(mcp_server.name, None)
             
-            logger.info(f"MCPServer deleted successfully: {mcp_server.name} ({mcp_server.uuid})")
+            logger.info(f"McpServer deleted successfully: {mcp_server.name} ({mcp_server.uuid})")
             return mcp_server_info
             
         except Exception as e:
             logger.error(f"Failed to delete mcp_server '{mcp_server.name}': {e}")
             return None
     
-    def get_mcp_server(self, identifier: str) -> Optional[MCPServer]:
+    def get_mcp_server(self, identifier: str) -> Optional[McpServer]:
         """通过 UUID 或名称获取MCP服务"""
         # 先按 UUID 查找
         if identifier in self.mcp_servers:
@@ -388,7 +388,7 @@ class MCPServerLoader:
         if not self.mcp_servers:
             return "No mcp_servers available."
         
-        lines = ["## Available MCPServers:"]
+        lines = ["## Available McpServers:"]
         for mcp_server in self.mcp_servers.values():
             lines.append(f"- **{mcp_server.name}**: {mcp_server.description}")
         
@@ -400,8 +400,6 @@ class MCPServerLoader:
         if not mcp_server:
             return None
         
-        readme = self.get_mcp_server_readme(mcp_server)
-        
         return {
             "uuid": mcp_server.uuid,
             "name": mcp_server.name,
@@ -412,14 +410,14 @@ class MCPServerLoader:
 
 
 # 全局单例
-_mcp_server_loader: Optional[MCPServerLoader] = None
+_mcp_server_loader: Optional[McpServerLoader] = None
 
 
-def get_mcp_server_loader() -> MCPServerLoader:
+def get_mcp_server_loader() -> McpServerLoader:
     """获取全局MCP服务加载器单例"""
     global _mcp_server_loader
     if _mcp_server_loader is None:
-        _mcp_server_loader = MCPServerLoader()
+        _mcp_server_loader = McpServerLoader()
     return _mcp_server_loader
 
 
@@ -428,7 +426,7 @@ def load_all_mcp_servers() -> int:
     return get_mcp_server_loader().load_all_mcp_servers()
 
 
-def get_mcp_server(identifier: str) -> Optional[MCPServer]:
+def get_mcp_server(identifier: str) -> Optional[McpServer]:
     """获取MCP服务"""
     return get_mcp_server_loader().get_mcp_server(identifier)
 

@@ -41,8 +41,6 @@ from .tools.builtin.memory_tools import MemoryToolsPlugin
 
 # IPC
 from .ipc_client import IpcClient
-# MCP
-from .mcp_client import MCPClientFactory, MCPClient
 
 from traceback import format_exc
 
@@ -320,6 +318,7 @@ When given a task:
             try:
                 async with session.post(url, headers=headers, json=payload) as response:
                     ct = await response.text()
+                    logger.debug(f'_make_api_request response:{ct}')
                     response.raise_for_status()
                     return await response.json()
             except aiohttp.ClientResponseError as e:

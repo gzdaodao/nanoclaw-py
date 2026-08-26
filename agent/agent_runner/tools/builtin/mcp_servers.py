@@ -196,7 +196,7 @@ class CreateMcpServerTool(BaseTool):
                 },
 
                 "auto_load": {
-                    "type": "Boolean",
+                    "type": "boolean",
                     "description": "Auto load the MCP server for every conversation",
                     "required": False
                 },
@@ -246,7 +246,10 @@ class CreateMcpServerTool(BaseTool):
                 return ToolResult.fail(f"McpServer with name '{name}' already exists")
             
             # 创建MCP服务
-            result = create_mcp_server(name.strip(), description.strip(), url.strip(),
+            result = create_mcp_server(
+                name=name.strip(), 
+                description=description.strip(), 
+                url=url.strip(),
                 api_key=api_key.strip(),
                 api_key_header=api_key_header.strip(),
                 api_key_prefix=api_key_prefix.strip(),
@@ -349,7 +352,7 @@ class LoadMcpServersTool(BaseTool):
                 loader.load_all_mcp_servers()
             
             mcp_server = loader.get_mcp_server(identifier)
-            agent = self.content.agent
+            agent = self.context.agent
             if not agent:
                 return ToolResult.fail(f"Failed to load mcp_server tools with agent in tool context")
            
