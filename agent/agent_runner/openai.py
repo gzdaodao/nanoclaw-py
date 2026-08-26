@@ -99,9 +99,6 @@ class OpenAIAgent(Agent):
         self.plugins: Dict[str, ToolPlugin] = {}
         self.tool_handlers: Dict[str, Callable] = {}
 
-        self.mcp_clients: Dict[str, MCPClient] = {}
-        self.mcp_tools: Dict[str, Dict] = {}  # tool_name -> {client_url, tool_spec}
- 
                
         # State
         self._session_id = context.session_id if context else ""
@@ -143,6 +140,7 @@ class OpenAIAgent(Agent):
     def _create_tool_context(self) -> ToolContext:
         """Create tool execution context"""
         return ToolContext(
+            agent=self,
             agent_name=self.name,
             group_folder=self.context.group_folder,
             chat_id=self.context.chat_id,
@@ -243,6 +241,7 @@ Main group: {self.context.is_main}
 4. Use other tools when appropriate
 5. Keep responses clear and helpful
 6. Tool call must strictly adhere to the OpenAI standards
+7. It the mcp server tools you want to use are not in the tools list, user tool: load_mcp_tools to add mcp server tools
 
 ## WORKFLOW
 When given a task:
@@ -657,35 +656,4 @@ When given a task:
 
 
 
-    
-    async def connect_mcp_server(self, server_url: str, api_key: str = None):
-        """Connect to an MCP server"""
-        client = await MCPClientFactory.get_or_create_client(
-            server_url=server_url,
-            api_key=api_key
-        )
-        self.mcp_clients[server_url] = client
-        
-        # Get tools from server
-        tools = await client.list_tools()
-        for tool in tools:
-            tool_name = tool["name"]
-            self.mcp_tools[tool_name] = {
-                "client_url": server_url,
-                "spec": tool
-            }
-            logger.info(f"Registered MCP tool: {tool_name} from {server_url}")
-        
-        return tools
-    
-    async def call_mcp_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
-        """Call an MCP tool"""
-        if tool_name not in self.mcp_tools:
-            raise ValueError(f"Tool not found: {tool_name}")
-        
-        tool_info = self.mcp_tools[tool_name]
-        client = self.mcp_clients[tool_info["client_url"]]
-        
-        return await client.call_tool(tool_name, arguments)
-
-
+  

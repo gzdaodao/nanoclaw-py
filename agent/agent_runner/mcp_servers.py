@@ -19,7 +19,7 @@ class MCPTool(BaseTool):
         super(MCPTool, self).__init__(context=context)
         self.server = server
         self._tool_spec = tool_spec
-        self.name = tool_spec.get('name')
+        self.name = 'MCP/{}/{}'.format(server.name, tool_spec.get('name'))
         self.description = tool_spec.get('description', f'MCP tool: {self.name}')
     
         # 获取 inputSchema 并转换为 OpenAI 格式
@@ -109,7 +109,7 @@ class MCPServer:
             api_key_prefix="Bearer",
             timeout=60,
             max_retries=3,
-            auto_load=True,):
+            auto_load=False):
 
         self.uuid = uuid
         self.name = name
@@ -463,7 +463,7 @@ def create_mcp_server(**kwargs) -> Optional[Dict]:
     return get_mcp_server_loader().create_mcp_server(**kwargs)
 
 
-def delete_mcp_server(identifier: str, force: bool = False) -> Optional[Dict]:
+def delete_mcp_server(identifier: str) -> Optional[Dict]:
     """
     删除MCP服务（便捷函数）
     
@@ -474,4 +474,4 @@ def delete_mcp_server(identifier: str, force: bool = False) -> Optional[Dict]:
     Returns:
         删除成功的MCP服务信息字典，失败返回 None
     """
-    return get_mcp_server_loader().delete_mcp_server(identifier, force)
+    return get_mcp_server_loader().delete_mcp_server(identifier)

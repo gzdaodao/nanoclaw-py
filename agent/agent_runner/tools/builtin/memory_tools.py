@@ -219,6 +219,39 @@ class GetMemoryTool(BaseTool):
             return ToolResult.fail(f"Failed to get memory: {e}")
 
 
+class DeleteMemoryTool(BaseTool):
+    """Tool to delete memory by key"""
+    
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            name="delete_memory",
+            description="Get a specific memory by key",
+            parameters={
+                "key": {
+                    "type": "string",
+                    "description": "Memory key",
+                    "required": True
+                }
+            },
+            category="memory",
+            required_permissions=["memory:delete"],
+            version="1.0.0"
+        )
+    
+    async def execute(self, key: str) -> ToolResult:
+        """Execute get memory"""
+        try:
+            if not self.context.memory_client:
+                return ToolResult.fail("Memory client not available")
+            
+            self.context.memory_client.delete(key)
+            return ToolResult.ok(f'Memory:{key} deleted.')
+            
+        except Exception as e:
+            return ToolResult.fail(f"Failed to get memory: {e}")
+
+
 class MemoryToolsPlugin(ToolPlugin):
     """Plugin providing memory tools"""
     
@@ -247,6 +280,7 @@ class MemoryToolsPlugin(ToolPlugin):
         context.memory_client = self.memory_client
         
         self.register_tool(SaveMemoryTool(context))
+        self.register_tool(DeleteMemoryTool(context))
         self.register_tool(SearchMemoryTool(context))
         self.register_tool(GetMemoryTool(context))
         

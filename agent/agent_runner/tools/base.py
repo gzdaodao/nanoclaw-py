@@ -8,6 +8,7 @@ import importlib
 import pkgutil
 import inspect
 from pathlib import Path
+from .base import Agent
 
 
 @dataclass
@@ -26,6 +27,7 @@ class ToolMetadata:
 @dataclass
 class ToolContext:
     """Tool execution context"""
+    agent: Agent
     agent_name: str
     group_folder: str
     chat_id: str
