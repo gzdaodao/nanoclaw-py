@@ -100,7 +100,7 @@ class MCPTool(BaseTool):
  
 
    
-
+       
 class McpServer:
     def __init__(self, uuid, name, url, path,
             description,
@@ -110,7 +110,7 @@ class McpServer:
             timeout=60,
             max_retries=3,
             auto_load=False):
-
+        
         self.uuid = uuid
         self.name = name
         self.url = url
@@ -123,37 +123,43 @@ class McpServer:
         self.max_retries = max_retries
         self.auto_load = auto_load
         self.tool_handlers = {}
+        # 不在这里调用 _load_tools
+        
+    async def initialize(self):
+        """异步初始化方法"""
         await self._load_tools()
-
+        return self
+    
     async def _connect(self):
-        # Create or get client
         client = await MCPClientFactory.get_or_create_client(
             server_url=self.url,
             api_key=self.api_key,
             api_key_header=self.api_key_header,
             api_key_prefix=self.api_key_prefix
         )
-
+        return client  # 注意：原代码缺少 return
 
     async def _load_tools(self):
         client = await self._connect()
         self.tool_handlers = {}
                
-        # Get tools from server
         tools = await client.list_tools()
         logger.info(f"Found {len(tools)} MCP tools from {self.name}")
   
-        # Register tools
         for tool_spec in tools:
             tool_name = tool_spec.get('name')
             if not tool_name:
                 continue
                        
             self.tool_handlers[tool_name] = MCPTool(self, tool_spec)
-            
             logger.info(f"Registered MCP tool: {tool_name} from {self.name}")
-        
 
+    @classmethod
+    async def create(cls, **kwargs):
+        """异步工厂方法"""
+        instance = cls(**kwargs)
+        await instance.initialize()
+        return instance
 
 class McpServerLoader:
     """极简MCP服务加载器 - 每个MCP服务独立索引"""
@@ -165,7 +171,7 @@ class McpServerLoader:
         self._loaded = False
         self._load_time: Optional[datetime] = None
     
-    def load_all_mcp_servers(self) -> int:
+    async def load_all_mcp_servers(self) -> int:
         """加载所有MCP服务 - 扫描每个子目录的 config.json"""
         if not self.mcp_servers_root.exists():
             logger.warning(f"McpServers directory not found: {self.mcp_servers_root}")
@@ -196,9 +202,7 @@ class McpServerLoader:
                     logger.warning(f"Invalid config.json in {mcp_server_dir}: missing required fields")
                     continue
                 
-                mcp_server = McpServer(
-                    **data
-                )
+                mcp_server = await McpServer.create(**data)
                 
                 self.mcp_servers[mcp_server.uuid] = mcp_server
                 self.mcp_servers_by_name[mcp_server.name] = mcp_server
@@ -421,9 +425,9 @@ def get_mcp_server_loader() -> McpServerLoader:
     return _mcp_server_loader
 
 
-def load_all_mcp_servers() -> int:
+async def load_all_mcp_servers() -> int:
     """加载所有MCP服务"""
-    return get_mcp_server_loader().load_all_mcp_servers()
+    return await get_mcp_server_loader().load_all_mcp_servers()
 
 
 def get_mcp_server(identifier: str) -> Optional[McpServer]:

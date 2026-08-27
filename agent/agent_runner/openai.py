@@ -175,7 +175,7 @@ class OpenAIAgent(Agent):
  
         # Load all mcp_servers
         try:
-            mcp_server_count = load_all_mcp_servers()
+            mcp_server_count = await load_all_mcp_servers()
             logger.info(f"Loaded {mcp_server_count} mcp_servers from /workspace/group/mcp_servers")
             self._stats["mcp_servers_loaded"] = mcp_server_count
         except Exception as e:
