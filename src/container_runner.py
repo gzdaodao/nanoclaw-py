@@ -14,7 +14,8 @@ import subprocess
 from .config import (
     CONTAINER_IMAGE, CONTAINER_MAX_OUTPUT_SIZE, CONTAINER_TIMEOUT,
     DATA_DIR, GROUPS_DIR, IDLE_TIMEOUT, TIMEZONE, HOST_DIR,
-    OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_ORG_ID, OPENAI_MODEL
+    OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_ORG_ID, OPENAI_MODEL,
+    CONTAINER_RUNTIME_BIN, CONTAINER_EX_ARGS
 )
 from .group_folder import GroupFolderResolver
 from .logger import logger
@@ -195,6 +196,10 @@ class ContainerArgumentBuilder:
                 args.extend(self.runtime.readonly_mount_args(mount.hostPath, mount.containerPath))
             else:
                 args.extend(['-v', f'{mount.hostPath}:{mount.containerPath}'])
+
+        if self.runtime.ex_args:
+            args.extend(self.runtime.ex_args)
+
         
         args.append(CONTAINER_IMAGE)
         
@@ -319,7 +324,7 @@ class ContainerRunner:
     """Main container runner class"""
     
     def __init__(self):
-        self.runtime = ContainerRuntime()
+        self.runtime = ContainerRuntime(runtime_bin=CONTAINER_RUNTIME_BIN, ex_args=CONTAINER_EX_ARGS)
         self.mount_builder = VolumeMountBuilder(
             project_root=Path.cwd(),
             data_dir=DATA_DIR,

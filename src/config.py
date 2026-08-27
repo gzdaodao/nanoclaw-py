@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from typing import Dict, Any, Optional
 from dotenv import load_dotenv
+import shlex
 
 # Load .env file if exists (for development, but all values can be overridden by env)
 load_dotenv()
@@ -31,6 +32,15 @@ def str_to_int(value: Optional[str], default: int) -> int:
         return int(value)
     except ValueError:
         return default
+
+def str_to_args(value: Optional[str]) -> list:
+    """Convert string to args."""
+    if value is None:
+        return None
+    
+    args = shlex.split(value)
+    return args
+
 
 def get_env_list(key: str, default: str = '') -> list:
     """Get comma-separated list from environment variable."""
@@ -95,6 +105,7 @@ MAX_CONCURRENT_CONTAINERS = max(1, str_to_int(os.getenv('MAX_CONCURRENT_CONTAINE
 
 # Container runtime binary
 CONTAINER_RUNTIME_BIN = os.getenv('CONTAINER_RUNTIME_BIN', 'docker')
+CONTAINER_EX_ARGS = str_to_args(os.getenv('CONTAINER_EX_ARGS', ''))
 
 # Mount allowlist path (for security)
 MOUNT_ALLOWLIST_PATH = Path(os.getenv(

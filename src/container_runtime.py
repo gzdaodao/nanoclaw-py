@@ -9,8 +9,9 @@ from .logger import logger
 class ContainerRuntime:
     """Container runtime manager"""
     
-    def __init__(self, runtime_bin: str = 'docker'):
+    def __init__(self, runtime_bin: str = 'docker', ex_args: List(str) = None):
         self.runtime_bin = runtime_bin
+        self.ex_args = ex_args
     
     def readonly_mount_args(self, host_path: str, container_path: str) -> List[str]:
         """Return CLI args for a readonly bind mount"""
@@ -70,8 +71,10 @@ class ContainerRuntime:
 
 
 # Maintain backward compatibility
-CONTAINER_RUNTIME_BIN = 'docker'
-readonly_mount_args = ContainerRuntime().readonly_mount_args
-stop_container = ContainerRuntime().stop_container
-ensure_container_runtime_running = ContainerRuntime().ensure_running
-cleanup_orphans = ContainerRuntime().cleanup_orphans
+
+from .config import CONTAINER_RUNTIME_BIN, CONTAINER_EX_ARGS
+
+readonly_mount_args = ContainerRuntime(runtime_bin=CONTAINER_RUNTIME_BIN, ex_args=CONTAINER_EX_ARGS).readonly_mount_args
+stop_container = ContainerRuntime(runtime_bin=CONTAINER_RUNTIME_BIN, ex_args=CONTAINER_EX_ARGS).stop_container
+ensure_container_runtime_running = ContainerRuntime(runtime_bin=CONTAINER_RUNTIME_BIN, ex_args=CONTAINER_EX_ARGS).ensure_running
+cleanup_orphans = ContainerRuntime(runtime_bin=CONTAINER_RUNTIME_BIN, ex_args=CONTAINER_EX_ARGS).cleanup_orphans
