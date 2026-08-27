@@ -318,7 +318,7 @@ When given a task:
             try:
                 async with session.post(url, headers=headers, json=payload) as response:
                     ct = await response.text()
-                    logger.debug(f'_make_api_request response:{ct}')
+                    logger.debug(f'_make_api_request response:[{response.status}] {ct}')
                     response.raise_for_status()
                     return await response.json()
             except aiohttp.ClientResponseError as e:
@@ -329,7 +329,7 @@ When given a task:
                     error_code = error.get('code')
                     error_message = error.get('message', 'Unknown error')
                 except Exception as e:
-                    raise APIError(error_message)
+                    raise e
 
                 status = response.status
                 if status == 400 and error_code == 'context_length_exceeded':
@@ -338,6 +338,13 @@ When given a task:
                     if error_code in ['insufficient_quota', 'credit_balance_exhausted', 'quota_exceeded']:
                         raise BalanceError(error_message)
 
+                logger.error(f"API request failed (attempt {attempt + 1}/{self.max_retries}): {e} {ct}")
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                    continue
+                else:
+                    raise APIError(error_message)
+ 
             except aiohttp.ClientError as e:
                 last_exception = e
                 logger.error(f"API request failed (attempt {attempt + 1}/{self.max_retries}): {e} {ct}")
