@@ -9,7 +9,7 @@ from .logger import logger
 class ContainerRuntime:
     """Container runtime manager"""
     
-    def __init__(self, runtime_bin: str = 'docker', ex_args: List(str) = None):
+    def __init__(self, runtime_bin: str = 'docker', ex_args: List[str] = None):
         self.runtime_bin = runtime_bin
         self.ex_args = ex_args
     
