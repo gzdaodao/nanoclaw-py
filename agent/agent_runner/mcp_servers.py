@@ -19,7 +19,7 @@ class MCPTool(BaseTool):
         super(MCPTool, self).__init__(context=context)
         self.server = server
         self._tool_spec = tool_spec
-        self.name = 'MCP/{}/{}'.format(server.name, tool_spec.get('name'))
+        self.name = 'MCP_{}_{}'.format(server.name, tool_spec.get('name'))
         self.description = tool_spec.get('description', f'MCP tool: {self.name}')
     
         # 获取 inputSchema 并转换为 OpenAI 格式
