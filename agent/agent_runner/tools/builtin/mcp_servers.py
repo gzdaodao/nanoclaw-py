@@ -355,7 +355,10 @@ class LoadMcpServersTool(BaseTool):
             agent = self.context.agent
             if not agent:
                 return ToolResult.fail(f"Failed to load mcp_server tools with agent in tool context")
-           
+            
+            for n, t in mcp_server.tool_handlers.items():
+                t.context = self.context
+
             #更新agent工具
             agent.tool_handlers.update(mcp_server.tool_handlers)
             

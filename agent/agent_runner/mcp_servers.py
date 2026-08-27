@@ -68,7 +68,7 @@ class MCPTool(BaseTool):
             name=self.name,
             description=self.description,
             parameters=self.parameters,
-            category="mcp",
+            category="mcp_servers",
             required_permissions=["mcp:call"],
             version="1.0.0",
             tags=["mcp",]
