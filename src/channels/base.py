@@ -22,6 +22,7 @@ class InboundMessage:
     is_group: bool = False
     raw_data: Optional[Dict[str, Any]] = None
     is_bot_message: bool = False
+    files: Optional[Dict[str, Any]] = None #base64 encode fields
 
 
 class Channel(ABC):
