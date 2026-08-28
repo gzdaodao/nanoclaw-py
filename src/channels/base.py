@@ -6,7 +6,7 @@ from typing import Callable, Optional, Dict, Any, List, Awaitable
 from datetime import datetime
 from dataclasses import dataclass
 import asyncio
-
+from ..dtypes import MessageAttachment 
 
 @dataclass
 class InboundMessage:
@@ -22,7 +22,7 @@ class InboundMessage:
     is_group: bool = False
     raw_data: Optional[Dict[str, Any]] = None
     is_bot_message: bool = False
-    files: Optional[Dict[str, Any]] = None #base64 encode fields
+    attachments: Optional[List[MessageAttachment]] = None  # MessageAttachment 列表
 
 
 class Channel(ABC):

@@ -1,4 +1,4 @@
-# dtypes.py - 数据类 (保持不变，已经是面向对象风格)
+# dtypes.py - 数据类
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Callable, Awaitable
 from enum import Enum
@@ -44,6 +44,14 @@ class RegisteredGroup:
     allowed_channels: Optional[List[str]] = None
 
 @dataclass
+class MessageAttachment:
+    """消息附件"""
+    filename: str
+    content_base64: str  # base64 编码的内容
+    file_size: Optional[int] = None
+    mime_type: Optional[str] = None
+
+@dataclass
 class NewMessage:
     """Incoming message"""
     id: str
@@ -54,6 +62,7 @@ class NewMessage:
     timestamp: str
     is_from_me: bool = False
     is_bot_message: bool = False
+    attachments: Optional[List[MessageAttachment]] = None  # 新增
 
 class ScheduleType(str, Enum):
     CRON = 'cron'

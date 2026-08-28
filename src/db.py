@@ -10,7 +10,7 @@ from typing import Optional, List, Dict, Any, Tuple, Generator, Union
 from .config import ASSISTANT_NAME, DATA_DIR, STORE_DIR
 from .group_folder import GroupFolderValidator
 from .logger import logger
-from .dtypes import NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog, TaskStatus, ScheduleType
+from .dtypes import NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog, TaskStatus, ScheduleType, MessageAttachment
 from traceback import format_exc
 import re
 
@@ -151,12 +151,29 @@ class Database:
                 timestamp TEXT,
                 is_from_me INTEGER,
                 is_bot_message INTEGER DEFAULT 0,
+                has_attachments INTEGER DEFAULT 0,
                 PRIMARY KEY (id, chat_id),
                 FOREIGN KEY (chat_id) REFERENCES chats(jid) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
             CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
             CREATE INDEX IF NOT EXISTS idx_messages_is_bot ON messages(is_bot_message);
+            
+            -- 附件表
+            CREATE TABLE IF NOT EXISTS message_attachments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id TEXT NOT NULL,
+                chat_id TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                content_base64 TEXT NOT NULL,
+                file_size INTEGER,
+                mime_type TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (message_id, chat_id) REFERENCES messages(id, chat_id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_attachments_message ON message_attachments(message_id, chat_id);
+            CREATE INDEX IF NOT EXISTS idx_attachments_chat ON message_attachments(chat_id);
+            CREATE INDEX IF NOT EXISTS idx_attachments_filename ON message_attachments(filename);
             
             CREATE TABLE IF NOT EXISTS scheduled_tasks (
                 id TEXT PRIMARY KEY,
@@ -253,6 +270,15 @@ class Database:
         except sqlite3.OperationalError:
             logger.error(format_exc())
             pass
+        
+        # Add has_attachments column if not exists
+        try:
+            conn.execute('ALTER TABLE messages ADD COLUMN has_attachments INTEGER DEFAULT 0')
+            conn.commit()
+            logger.info("Added has_attachments column to messages")
+        except sqlite3.OperationalError:
+            logger.error(format_exc())
+            pass
     
     # --- Chat operations ---
     
@@ -330,17 +356,31 @@ class Database:
     # --- Message operations ---
     
     def store_message(self, msg: NewMessage) -> None:
-        """Store a message"""
+        """Store a message with attachments"""
         logger.info(f"store_message: msg:{msg}")
         with self.transaction():
+            # 存储消息
             self.execute('''
                 INSERT OR REPLACE INTO messages 
-                (id, chat_id, sender_id, sender_name, content, timestamp, is_from_me, is_bot_message)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (id, chat_id, sender_id, sender_name, content, timestamp, is_from_me, is_bot_message, has_attachments)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 msg.id, msg.chat_id, msg.sender_id, msg.sender_name, msg.content,
-                msg.timestamp, 1 if msg.is_from_me else 0, 1 if msg.is_bot_message else 0
+                msg.timestamp, 1 if msg.is_from_me else 0, 1 if msg.is_bot_message else 0,
+                1 if msg.attachments else 0
             ))
+            
+            # 如果有附件，存储附件
+            if msg.attachments:
+                for att in msg.attachments:
+                    self.execute('''
+                        INSERT INTO message_attachments 
+                        (message_id, chat_id, filename, content_base64, file_size, mime_type, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        msg.id, msg.chat_id, att.filename, att.content_base64,
+                        att.file_size, att.mime_type, msg.timestamp
+                    ))
     
     def store_message_direct(
         self,
@@ -360,6 +400,46 @@ class Database:
             is_bot_message=is_bot_message
         ))
     
+    # 新增：获取消息附件
+    def get_message_attachments(self, message_id: str, chat_id: str) -> List[Dict[str, Any]]:
+        """获取消息的所有附件"""
+        with self.cursor() as cursor:
+            cursor.execute('''
+                SELECT filename, content_base64, file_size, mime_type
+                FROM message_attachments
+                WHERE message_id = ? AND chat_id = ?
+            ''', (message_id, chat_id))
+            return [dict(row) for row in cursor.fetchall()]
+    
+    # 修改：从数据库行转换为 NewMessage 时包含附件
+    def _row_to_message(self, row: Dict[str, Any]) -> NewMessage:
+        """将数据库行转换为 NewMessage 对象"""
+        attachments = None
+        if row.get('has_attachments'):
+            att_list = self.get_message_attachments(row['id'], row['chat_id'])
+            if att_list:
+                attachments = [
+                    MessageAttachment(
+                        filename=att['filename'],
+                        content_base64=att['content_base64'],
+                        file_size=att.get('file_size'),
+                        mime_type=att.get('mime_type')
+                    )
+                    for att in att_list
+                ]
+        
+        return NewMessage(
+            id=row['id'],
+            chat_id=row['chat_id'],
+            sender_id=row['sender_id'],
+            sender_name=row['sender_name'],
+            content=row['content'],
+            timestamp=row['timestamp'],
+            is_from_me=bool(row['is_from_me']),
+            is_bot_message=bool(row.get('is_bot_message', 0)),
+            attachments=attachments
+        )
+    
     def get_new_messages(
         self,
         jids: List[str],
@@ -373,7 +453,7 @@ class Database:
         placeholders = ','.join(['?'] * len(jids))
         with self.cursor() as cursor:
             cursor.execute(f'''
-                SELECT id, chat_id, sender_id, sender_name, content, timestamp
+                SELECT id, chat_id, sender_id, sender_name, content, timestamp, is_from_me, is_bot_message, has_attachments
                 FROM messages
                 WHERE timestamp > ? AND chat_id IN ({placeholders})
                   AND is_bot_message = 0 AND content NOT LIKE ?
@@ -384,7 +464,7 @@ class Database:
             messages = []
             new_timestamp = last_timestamp
             for row in cursor.fetchall():
-                msg = NewMessage(**dict(row))
+                msg = self._row_to_message(dict(row))
                 messages.append(msg)
                 if msg.timestamp > new_timestamp:
                     new_timestamp = msg.timestamp
@@ -403,7 +483,7 @@ class Database:
         
         with self.cursor() as cursor:
             cursor.execute('''
-                SELECT id, chat_id, sender_id, sender_name, content, timestamp
+                SELECT id, chat_id, sender_id, sender_name, content, timestamp, is_from_me, is_bot_message, has_attachments
                 FROM messages
                 WHERE chat_id = ? AND timestamp > ?
                   AND is_bot_message = 0 AND content NOT LIKE ?
@@ -411,7 +491,67 @@ class Database:
                 ORDER BY timestamp
             ''', (chat_id, since_timestamp, f'{bot_prefix}:%'))
             
-            return [NewMessage(**dict(row)) for row in cursor.fetchall()]
+            return [self._row_to_message(dict(row)) for row in cursor.fetchall()]
+    
+    # 新增：附件统计和清理方法
+    def get_attachments_count(self, chat_id: str) -> int:
+        """获取指定聊天中的附件总数"""
+        with self.cursor() as cursor:
+            cursor.execute(
+                'SELECT COUNT(*) as count FROM message_attachments WHERE chat_id = ?',
+                (chat_id,)
+            )
+            row = cursor.fetchone()
+            return row['count'] if row else 0
+    
+    def get_total_attachments_size(self, chat_id: str) -> int:
+        """获取指定聊天的附件总大小"""
+        with self.cursor() as cursor:
+            cursor.execute(
+                'SELECT SUM(file_size) as total FROM message_attachments WHERE chat_id = ?',
+                (chat_id,)
+            )
+            row = cursor.fetchone()
+            return row['total'] or 0
+    
+    def delete_message_with_attachments(self, message_id: str, chat_id: str) -> None:
+        """删除消息及其附件"""
+        with self.transaction():
+            # 附件会通过 FOREIGN KEY ON DELETE CASCADE 自动删除
+            self.execute(
+                'DELETE FROM messages WHERE id = ? AND chat_id = ?',
+                (message_id, chat_id)
+            )
+    
+    def clean_old_attachments(self, before_timestamp: str) -> int:
+        """清理指定时间之前的附件（仅删除附件数据，保留消息）"""
+        with self.transaction():
+            # 获取要删除的附件数量
+            cursor = self.execute('''
+                SELECT COUNT(*) as count FROM message_attachments 
+                WHERE created_at < ?
+            ''', (before_timestamp,))
+            count = cursor.fetchone()['count']
+            
+            # 删除附件
+            self.execute('''
+                DELETE FROM message_attachments WHERE created_at < ?
+            ''', (before_timestamp,))
+            
+            # 更新消息的 has_attachments 标志
+            self.execute('''
+                UPDATE messages 
+                SET has_attachments = 0 
+                WHERE id IN (
+                    SELECT DISTINCT message_id FROM messages m
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM message_attachments ma 
+                        WHERE ma.message_id = m.id AND ma.chat_id = m.chat_id
+                    )
+                )
+            ''')
+            
+            return count
     
     # --- Task operations ---
     

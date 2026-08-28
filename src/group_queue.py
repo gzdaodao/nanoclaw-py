@@ -9,6 +9,7 @@ from typing import Dict, Optional, List, Callable, Awaitable, Any
 
 from .config import DATA_DIR, MAX_CONCURRENT_CONTAINERS
 from .logger import logger
+from .dtypes import MessageAttachment
 
 
 @dataclass
@@ -49,7 +50,7 @@ class InputWriter:
     def __init__(self, data_dir: Path = DATA_DIR):
         self.data_dir = data_dir
     
-    def send_message(self, group_folder: str, text: str, group_jid: str) -> bool:
+    def send_message(self, group_folder: str, text: str, group_jid: str, attachments: Optional[List[MessageAttachment]] = None) -> bool:
         """Send follow-up message to active container via IPC file"""
         logger.info(f'Group queue send_message: group_folder:{group_folder}, text:{text}')
         input_dir = self.data_dir / 'ipc' / group_folder / 'input'
@@ -58,7 +59,17 @@ class InputWriter:
             filename = f"{int(datetime.now().timestamp() * 1000)}-{os.urandom(2).hex()}.json"
             filepath = input_dir / filename
             temp_path = filepath.with_suffix('.tmp')
-            temp_path.write_text(json.dumps({'type': 'message', 'chatJid': group_jid, 'text': text}))
+            temp_path.write_text(json.dumps({
+                'type': 'message', 
+                'chatJid': group_jid, 
+                'text': text,
+                'attachments': [{
+                    'filename': att.filename,
+                    'content_base64': att.content_base64,
+                    'file_size': att.file_size,
+                    'mime_type': att.mime_type,
+                    } for att in attachments or []],
+                }))
             temp_path.rename(filepath)
             return True
         except Exception as e:
@@ -170,7 +181,7 @@ class GroupQueue:
         if state.pending_tasks:
             self._close_stdin(group_jid)
     
-    def send_message(self, group_jid: str, text: str) -> bool:
+    def send_message(self, group_jid: str, text: str, attachments: Optional[List[MessageAttachment]] = None) -> bool:
         """Send follow-up message to active container via IPC file"""
         state = self._get_group(group_jid)
         
@@ -178,7 +189,7 @@ class GroupQueue:
         if state.active and state.group_folder and not state.is_task_container:
             # 容器激活，立即发送
             state.idle_waiting = False
-            success = self.input_writer.send_message(state.group_folder, text, group_jid)
+            success = self.input_writer.send_message(state.group_folder, text, group_jid, attachments)
             if success:
                 logger.debug(f"Message sent to active container for {group_jid}")
             return success

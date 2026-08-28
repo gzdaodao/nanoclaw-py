@@ -13,6 +13,7 @@ from traceback import format_exc
 
 from .base import Channel, InboundMessage
 from .. import config
+from ..dtypes import MessageAttachment  # 导入 MessageAttachment
 
 
 class OdooChannel(Channel):
@@ -70,6 +71,9 @@ class OdooChannel(Channel):
         self._request_semaphore = asyncio.Semaphore(5)  # Max 5 concurrent requests
         self._last_request_time = 0
         self._min_request_interval = 0.5  # 500ms between requests
+        
+        # Attachment cache
+        self._attachment_cache: Dict[int, List[MessageAttachment]] = {}
 
     async def connect(self) -> None:
         """Connect to Odoo via async XML-RPC."""
@@ -466,7 +470,7 @@ class OdooChannel(Channel):
                     ['id', '>', self._last_message_ids.get('private', 0)]
                 ]],
                 {
-                    'fields': ['id', 'body', 'author_id', 'date', 'subject'],
+                    'fields': ['id', 'body', 'author_id', 'date', 'subject', 'attachment_ids'],
                     'limit': 50,
                     'order': 'id ASC'
                 }
@@ -490,6 +494,13 @@ class OdooChannel(Channel):
                     
                     # Get partner name
                     partner_name = author
+                
+                    # Get attachments if any
+                    attachments = None
+                    attachment_ids = msg.get('attachment_ids', [])
+                    if attachment_ids:
+                        attachments = await self._get_message_attachments(msg_id)
+ 
                     
                     message = InboundMessage(
                         id=f"mail.message:{msg_id}",
@@ -501,7 +512,8 @@ class OdooChannel(Channel):
                         timestamp=datetime.fromisoformat(msg['date'].replace('Z', '+00:00')),
                         is_from_me=False,
                         is_group=False,
-                        raw_data=msg
+                        raw_data=msg,
+                        attachments=attachments
                     )
                     
                     await self._process_inbound_message(message)
@@ -530,7 +542,7 @@ class OdooChannel(Channel):
                     ['model', '!=', 'mail.channel']
                 ]],
                 {
-                    'fields': ['id', 'subject', 'body', 'author_id', 'model', 'res_id', 'date'],
+                    'fields': ['id', 'subject', 'body', 'author_id', 'model', 'res_id', 'date', 'attachment_ids'],
                     'limit': 50
                 }
             )
@@ -542,6 +554,13 @@ class OdooChannel(Channel):
                 author = msg.get('author_id', [0, ''])[1] if msg.get('author_id') else 'Unknown'
                 model = msg.get('model', '')
                 res_id = msg.get('res_id', 0)
+                
+                # Get attachments if any
+                attachments = None
+                attachment_ids = msg.get('attachment_ids', [])
+                if attachment_ids:
+                    attachments = await self._get_message_attachments(msg_id)
+ 
                 
                 # Create JID based on context
                 if model == 'mail.channel' and res_id:
@@ -564,7 +583,8 @@ class OdooChannel(Channel):
                     timestamp=datetime.fromisoformat(msg['date'].replace('Z', '+00:00')),
                     is_from_me=False,
                     is_group=True,
-                    raw_data=msg
+                    raw_data=msg,
+                    attachments=attachments
                 )
                 
                 await self._process_inbound_message(message)
@@ -574,6 +594,75 @@ class OdooChannel(Channel):
                 
         except Exception as e:
             logger.error(f"Error checking mentions: {e}")
+
+    async def _get_message_attachments(self, message_id: int) -> List[MessageAttachment]:
+        """
+        Get attachments for a message and return as MessageAttachment list.
+        
+        Args:
+            message_id: The mail.message ID
+            
+        Returns:
+            List of MessageAttachment objects
+        """
+        attachments: List[MessageAttachment] = []
+        
+        try:
+            # Get attachment IDs for this message
+            attachment_ids = await self.models.execute_kw(
+                self.database,
+                self.uid,
+                self.password,
+                'mail.message',
+                'read',
+                [[message_id], ['attachment_ids']]
+            )
+            
+            if not attachment_ids or not attachment_ids[0].get('attachment_ids'):
+                return attachments
+            
+            attach_ids = attachment_ids[0]['attachment_ids']
+            
+            if not attach_ids:
+                return attachments
+            
+            # Get attachment details
+            attach_data = await self.models.execute_kw(
+                self.database,
+                self.uid,
+                self.password,
+                'ir.attachment',
+                'search_read',
+                [[['id', 'in', attach_ids]]],
+                {
+                    'fields': ['id', 'name', 'datas', 'mimetype', 'file_size'],
+                    'limit': 20  # Reasonable limit
+                }
+            )
+            
+            for attach in attach_data:
+                attach_name = attach.get('name', f'attachment_{attach["id"]}')
+                datas = attach.get('datas', '')
+                file_size = attach.get('file_size')
+                mime_type = attach.get('mimetype')
+                
+                if datas:
+                    # 创建 MessageAttachment 对象
+                    attachment = MessageAttachment(
+                        filename=attach_name,
+                        content_base64=datas,
+                        file_size=file_size,
+                        mime_type=mime_type
+                    )
+                    attachments.append(attachment)
+                    logger.debug(f"Added attachment: {attach_name} ({len(datas)} chars)")
+                else:
+                    logger.warning(f"Attachment {attach_name} has no data")
+                    
+        except Exception as e:
+            logger.error(f"Error getting attachments for message {message_id}: {e}")
+            
+        return attachments
 
     async def _process_channel_messages(self, channel_id: int, channel_name: str, channel_type: str, message_ids: List[int]) -> None:
         """Process messages from a channel."""
@@ -585,7 +674,7 @@ class OdooChannel(Channel):
                 self.password,
                 'mail.message',
                 'read',
-                [message_ids, ['id', 'subject', 'body', 'author_id', 'date', 'message_type']]
+                [message_ids, ['id', 'subject', 'body', 'author_id', 'date', 'message_type', 'attachment_ids']]
             )
             
             jid = self.create_jid(f"mail.channel:{channel_id}")
@@ -602,9 +691,15 @@ class OdooChannel(Channel):
                 if msg.get('message_type') != 'comment':
                     continue
                 
-                is_from_me=(author_id == self.partner_id)
+                is_from_me = (author_id == self.partner_id)
                 if is_from_me:
                     continue
+                
+                # Get attachments if any
+                attachments = None
+                attachment_ids = msg.get('attachment_ids', [])
+                if attachment_ids:
+                    attachments = await self._get_message_attachments(msg_id)
                 
                 # Create message
                 message = InboundMessage(
@@ -616,10 +711,13 @@ class OdooChannel(Channel):
                     content=body,
                     timestamp=datetime.fromisoformat(msg['date'].replace('Z', '+00:00')),
                     is_from_me=is_from_me,
-                    #is_bot_message=(author_id == self.partner_id),
                     is_group=False if channel_type == 'chat' else True,
-                    raw_data=msg
+                    raw_data=msg,
+                    attachments=attachments
                 )
+                
+                if attachments:
+                    logger.info(f"Message {msg_id} has {len(attachments)} attachment(s)")
                 
                 await self._process_inbound_message(message)
                 
@@ -633,14 +731,14 @@ class OdooChannel(Channel):
     async def _process_private_messages(self, partner_id: int, partner_name: str, message_ids: List[int]) -> None:
         """Process private messages from a partner."""
         try:
-            # Get message details
+            # Get message details with attachment info
             messages = await self.models.execute_kw(
                 self.database,
                 self.uid,
                 self.password,
                 'mail.message',
                 'read',
-                [message_ids, ['id', 'subject', 'body', 'author_id', 'date']]
+                [message_ids, ['id', 'subject', 'body', 'author_id', 'date', 'attachment_ids']]
             )
             
             jid = self.create_jid(f"res.partner:{partner_id}")
@@ -653,9 +751,15 @@ class OdooChannel(Channel):
                 author_id = author_info[0] if isinstance(author_info, list) else 0
                 author_name = author_info[1] if isinstance(author_info, list) and len(author_info) > 1 else 'Unknown'
                  
-                is_from_me=(author_id == self.partner_id)
+                is_from_me = (author_id == self.partner_id)
                 if is_from_me:
                     continue
+
+                # Get attachments if any
+                attachments = None
+                attachment_ids = msg.get('attachment_ids', [])
+                if attachment_ids:
+                    attachments = await self._get_message_attachments(msg_id)
 
                 # Create message
                 message = InboundMessage(
@@ -667,10 +771,13 @@ class OdooChannel(Channel):
                     content=body,
                     timestamp=datetime.fromisoformat(msg['date'].replace('Z', '+00:00')),
                     is_from_me=is_from_me,
-                    #is_bot_message=(author_id == self.partner_id),
                     is_group=False,
-                    raw_data=msg
+                    raw_data=msg,
+                    attachments=attachments
                 )
+                
+                if attachments:
+                    logger.info(f"Private message {msg_id} has {len(attachments)} attachment(s)")
                 
                 await self._process_inbound_message(message)
                 
@@ -709,22 +816,6 @@ class OdooChannel(Channel):
     async def _send_private_message(self, partner_id: int, text: str) -> bool:
         """Send private message to a partner."""
         try:
-            # Create or get conversation
-            #message_id = await self.models.execute_kw(
-            #    self.database,
-            #    self.uid,
-            #    self.password,
-            #    'mail.message',
-            #    'create',
-            #    [{
-            #        'body': text,
-            #        'partner_ids': [(4, partner_id)],
-            #        'message_type': 'comment',
-            #        #'subtype_xmlid': 'mail.mt_comment',
-            #        'model': 'res.partner',
-            #        'res_id': partner_id
-            #    }]
-            #)
             message_id = await self.models.execute_kw(
                 self.database,
                 self.uid,
