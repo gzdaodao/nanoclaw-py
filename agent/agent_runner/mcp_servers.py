@@ -19,6 +19,7 @@ class MCPTool(BaseTool):
         super(MCPTool, self).__init__(context=context)
         self.server = server
         self._tool_spec = tool_spec
+        self.func_name = tool_spec.get('name')
         self.name = 'mcp_{}_{}'.format(server.name, tool_spec.get('name'))
         self.description = tool_spec.get('description', f'MCP tool: {self.name}')
     
@@ -77,12 +78,12 @@ class MCPTool(BaseTool):
     async def execute(self, **kwargs) -> ToolResult:
         """Execute tools"""
         try:
-            client = await self._connect()
+            client = await self.server._connect()
             
             # 调用 MCP 工具
-            logger.info(f"Calling MCP tool: {self.name} with args: {kwargs}")
+            logger.info(f"Calling MCP tool: {self.func_name} with args: {kwargs}")
             
-            result = await client.call_tool(self.name, kwargs)
+            result = await client.call_tool(self.func_name, kwargs)
             
             # 返回标准 ToolResult
             if isinstance(result, dict):
