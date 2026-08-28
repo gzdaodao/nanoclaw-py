@@ -50,6 +50,21 @@ class MessageAttachment:
     content_base64: str  # base64 编码的内容
     file_size: Optional[int] = None
     mime_type: Optional[str] = None
+    
+    def __repr__(self) -> str:
+        """自定义打印显示，只显示 base64 预览"""
+        preview = self.content_base64[:20] + "..." if len(self.content_base64) > 20 else self.content_base64
+        return (f"MessageAttachment(filename='{self.filename}', "
+                f"content_base64='{preview}...', "
+                f"file_size={self.file_size}, "
+                f"mime_type='{self.mime_type}')")
+    
+    def __str__(self) -> str:
+        """友好的字符串显示"""
+        size_str = f" ({self.file_size} bytes)" if self.file_size else ""
+        mime_str = f" [{self.mime_type}]" if self.mime_type else ""
+        return f"{self.filename}{size_str}{mime_str}"
+
 
 @dataclass
 class NewMessage:
