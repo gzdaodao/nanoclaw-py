@@ -27,7 +27,6 @@ class ToolMetadata:
 @dataclass
 class ToolContext:
     """Tool execution context"""
-    agent: Agent
     agent_name: str
     group_folder: str
     chat_id: str
@@ -38,6 +37,7 @@ class ToolContext:
     workspace_dir: Optional[Path] = None
     ipc_client: Optional[Any] = None
     memory_client: Optional[Any] = None
+    agent: Optional[Agent] = None
 
 
 class ToolResult:

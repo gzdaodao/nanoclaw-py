@@ -4,6 +4,7 @@
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import uuid as uuid_lib
+import copy
 
 from agent_runner.tools.base import BaseTool, ToolPlugin, ToolMetadata, ToolContext, ToolResult
 from agent_runner.logger import logger
@@ -356,8 +357,10 @@ class LoadMcpServersTool(BaseTool):
             if not agent:
                 return ToolResult.fail(f"Failed to load mcp_server tools with agent in tool context")
             
+            ctx = copy.copy(self.context)
+            ctx.agent = None
             for n, t in mcp_server.tool_handlers.items():
-                t.context = self.context
+                t.context = ctx
 
             #更新agent工具
             agent.tool_handlers.update(mcp_server.tool_handlers)

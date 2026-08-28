@@ -19,7 +19,7 @@ class MCPTool(BaseTool):
         super(MCPTool, self).__init__(context=context)
         self.server = server
         self._tool_spec = tool_spec
-        self.name = 'MCP_{}_{}'.format(server.name, tool_spec.get('name'))
+        self.name = 'mcp_{}_{}'.format(server.name, tool_spec.get('name'))
         self.description = tool_spec.get('description', f'MCP tool: {self.name}')
     
         # 获取 inputSchema 并转换为 OpenAI 格式
@@ -150,9 +150,9 @@ class McpServer:
             tool_name = tool_spec.get('name')
             if not tool_name:
                 continue
-                       
-            self.tool_handlers[tool_name] = MCPTool(self, tool_spec)
-            logger.info(f"Registered MCP tool: {tool_name} from {self.name}")
+            t = MCPTool(self, tool_spec) 
+            self.tool_handlers[t.name] = t
+            logger.info(f"Registered MCP tool: {t.name} from {self.name}")
 
     @classmethod
     async def create(cls, **kwargs):
