@@ -81,6 +81,23 @@ class ConversationDatabase:
                     FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
                 )
             """)
+
+            # Attachments table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS message_attachments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message_id INTEGER NOT NULL,
+                    session_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    content_base64 TEXT NOT NULL,
+                    file_size INTEGER,
+                    mime_type TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+                    FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+                )
+            """)
+ 
             
             # Indexes for better query performance
             cursor.execute("""
@@ -95,6 +112,16 @@ class ConversationDatabase:
                 CREATE INDEX IF NOT EXISTS idx_sessions_group_folder 
                 ON sessions(group_folder)
             """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_attachments_message_id 
+                ON message_attachments(message_id)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_attachments_session_id 
+                ON message_attachments(session_id)
+            """)
+ 
             
             # Create trigger for updated_at
             cursor.execute("""
@@ -569,6 +596,188 @@ class ConversationDatabase:
             backup_conn = sqlite3.connect(str(backup_path))
             conn.backup(backup_conn)
             backup_conn.close()
+
+    # 添加附件相关方法
+    
+    def save_message_with_attachments(
+        self, 
+        session_id: str, 
+        message: AgentMessage,
+        attachments: Optional[List[Dict[str, Any]]] = None
+    ) -> int:
+        """
+        Save a message with attachments to database
+        
+        Returns:
+            Message ID
+        """
+        self.ensure_initialized()
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # 插入消息
+            cursor.execute("""
+                INSERT INTO messages 
+                (session_id, role, content, timestamp, tool_calls, tool_call_id, name, metadata, has_attachments)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                session_id,
+                message.role,
+                message.content,
+                message.timestamp.isoformat(),
+                json.dumps(message.tool_calls) if message.tool_calls else None,
+                message.tool_call_id,
+                message.name,
+                json.dumps(message.metadata) if message.metadata else None,
+                1 if attachments else 0
+            ))
+            
+            message_id = cursor.lastrowid
+            
+            # 如果有附件，保存附件
+            if attachments:
+                for att in attachments:
+                    cursor.execute("""
+                        INSERT INTO message_attachments 
+                        (message_id, session_id, filename, content_base64, file_size, mime_type)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        message_id,
+                        session_id,
+                        att.get('filename', 'unknown'),
+                        att.get('content_base64', ''),
+                        att.get('file_size'),
+                        att.get('mime_type')
+                    ))
+            
+            # Update session's updated_at
+            cursor.execute("""
+                UPDATE sessions SET updated_at = CURRENT_TIMESTAMP 
+                WHERE session_id = ?
+            """, (session_id,))
+            
+            return message_id
+    
+    def get_message_attachments(self, message_id: int) -> List[Dict[str, Any]]:
+        """获取消息的附件"""
+        self.ensure_initialized()
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, filename, content_base64, file_size, mime_type, created_at
+                FROM message_attachments
+                WHERE message_id = ?
+            """, (message_id,))
+            
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def get_session_attachments(
+        self, 
+        session_id: str, 
+        limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """获取会话的所有附件"""
+        self.ensure_initialized()
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT ma.*, m.role, m.content as message_content, m.timestamp
+                FROM message_attachments ma
+                JOIN messages m ON ma.message_id = m.id
+                WHERE ma.session_id = ?
+                ORDER BY ma.created_at DESC
+            """
+            params = [session_id]
+            
+            if limit is not None:
+                query += " LIMIT ?"
+                params.append(limit)
+            
+            cursor.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def get_attachments_by_filename(
+        self, 
+        session_id: str, 
+        filename: str
+    ) -> List[Dict[str, Any]]:
+        """根据文件名获取附件"""
+        self.ensure_initialized()
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM message_attachments
+                WHERE session_id = ? AND filename LIKE ?
+                ORDER BY created_at DESC
+            """, (session_id, f'%{filename}%'))
+            
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def delete_attachment(self, attachment_id: int) -> bool:
+        """删除附件"""
+        self.ensure_initialized()
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM message_attachments WHERE id = ?",
+                (attachment_id,)
+            )
+            return cursor.rowcount > 0
+    
+    def delete_session_attachments(self, session_id: str) -> int:
+        """删除会话的所有附件"""
+        self.ensure_initialized()
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM message_attachments WHERE session_id = ?",
+                (session_id,)
+            )
+            return cursor.rowcount
+    
+    def get_attachment_stats(self, session_id: str) -> Dict[str, Any]:
+        """获取附件统计信息"""
+        self.ensure_initialized()
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # 总附件数
+            cursor.execute(
+                "SELECT COUNT(*) as total FROM message_attachments WHERE session_id = ?",
+                (session_id,)
+            )
+            total = cursor.fetchone()['total']
+            
+            # 总大小
+            cursor.execute(
+                "SELECT SUM(file_size) as total_size FROM message_attachments WHERE session_id = ?",
+                (session_id,)
+            )
+            total_size = cursor.fetchone()['total_size'] or 0
+            
+            # 按 MIME 类型分组
+            cursor.execute("""
+                SELECT mime_type, COUNT(*) as count, SUM(file_size) as total_size
+                FROM message_attachments
+                WHERE session_id = ?
+                GROUP BY mime_type
+            """, (session_id,))
+            by_mime = [dict(row) for row in cursor.fetchall()]
+            
+            return {
+                "total_attachments": total,
+                "total_size_bytes": total_size,
+                "by_mime_type": by_mime
+            }
+
 
 
 # Singleton instance for global database access

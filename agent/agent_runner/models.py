@@ -16,6 +16,7 @@ class AgentMessage:
     tool_calls: Optional[List[Dict[str, Any]]] = None
     tool_call_id: Optional[str] = None
     name: Optional[str] = None
+    attachments: Optional[List[Dict[str, Any]]] = None  # 新增
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API"""
@@ -29,6 +30,18 @@ class AgentMessage:
             msg["tool_call_id"] = self.tool_call_id
         if self.name:
             msg["name"] = self.name
+
+        if self.attachments:
+            msg["attachments"] = [
+                {
+                    "filename": att.get('filename'),
+                    "file_size": att.get('file_size'),
+                    "mime_type": att.get('mime_type'),
+                    "content_base64": att.get('content_base64'),
+                }
+                for att in self.attachments
+            ]
+
         return msg
     
     @classmethod
@@ -40,7 +53,8 @@ class AgentMessage:
             metadata=data.get("metadata", {}),
             tool_calls=data.get("tool_calls"),
             tool_call_id=data.get("tool_call_id"),
-            name=data.get("name")
+            name=data.get("name"),
+            attachments=data.get("attachments"),
         )
 
 

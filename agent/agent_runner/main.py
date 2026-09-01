@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+import uuid
+import base64
 import traceback
 
 # Add parent directory to path
@@ -219,11 +221,29 @@ class AgentRunner:
     
     async def _handle_message(self, data: Dict):
         """Handle message"""
+        workspace_dir = Path(self._input_data.get('workspaceDir', '/workspace/group'))
+
+
         text = data.get('text', '')
         jid = self._input_data.get('chatJid')
         message_id = data.get('id', '')
         stream = data.get('stream', False)
+        attachments = data.get('attachments', False)
         logger.info(f"_handle_message: {data}")
+        
+        timestamp = int(datetime.now().timestamp() * 1000)
+        att_dir = workspace_dir / 'attachments' / message_id or f"file_{timestamp}_{uuid.uuid4().hex[:8]}"
+        att_dir.mkdir(parents=True, exist_ok=True)
+
+        msg_att_paths = []
+        for att in attachments:
+            file_path = att_dir / att['filename']
+            msg_att_paths.append(str(file_path))
+
+            file_data = base64.b64decode(att.get('content_base64'))
+            file_path.write_bytes(file_data)
+        if msg_att_paths:
+            text += 'attachments:\n{}'.format('\n'.join(msg_att_paths))
         
         logger.info(f"Processing message: {message_id} (stream={stream})")
         
