@@ -10,6 +10,7 @@ from typing import Dict, Optional, List, Callable, Awaitable, Any
 from .config import DATA_DIR, MAX_CONCURRENT_CONTAINERS
 from .logger import logger
 from .dtypes import MessageAttachment
+import uuid
 
 
 @dataclass
@@ -60,6 +61,7 @@ class InputWriter:
             filepath = input_dir / filename
             temp_path = filepath.with_suffix('.tmp')
             temp_path.write_text(json.dumps({
+                'id': uuid.uuid4().hex,
                 'type': 'message', 
                 'chatJid': group_jid, 
                 'text': text,

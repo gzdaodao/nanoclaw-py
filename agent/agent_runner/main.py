@@ -227,24 +227,25 @@ class AgentRunner:
 
         text = data.get('text', '')
         jid = self._input_data.get('chatJid')
-        message_id = data.get('id', '')
+        message_id = data.get('id', '') or uuid.uuid4().hex
         stream = data.get('stream', False)
         attachments = data.get('attachments', False)
         logger.info(f"_handle_message: {data}")
-        
-        timestamp = int(datetime.now().timestamp() * 1000)
-        att_dir = workspace_dir / 'attachments' / message_id or f"file_{timestamp}_{uuid.uuid4().hex[:8]}"
-        att_dir.mkdir(parents=True, exist_ok=True)
-
         msg_att_paths = []
-        for att in attachments:
-            file_path = att_dir / att['filename']
-            msg_att_paths.append(str(file_path))
 
-            file_data = base64.b64decode(att.get('content_base64'))
-            file_path.write_bytes(file_data)
-        if msg_att_paths:
-            text += 'attachments:\n{}'.format('\n'.join(msg_att_paths))
+        if attachments:        
+            timestamp = int(datetime.now().timestamp() * 1000)
+            att_dir = workspace_dir / 'attachments' / message_id
+            att_dir.mkdir(parents=True, exist_ok=True)
+
+            for att in attachments:
+                file_path = att_dir / att['filename']
+                msg_att_paths.append(str(file_path))
+
+                file_data = base64.b64decode(att.get('content_base64'))
+                file_path.write_bytes(file_data)
+            if msg_att_paths:
+                text += 'attachments:\n{}'.format('\n'.join(msg_att_paths))
         
         logger.info(f"Processing message: {message_id} (stream={stream})")
         
