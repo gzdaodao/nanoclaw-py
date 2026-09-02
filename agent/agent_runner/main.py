@@ -181,6 +181,7 @@ class AgentRunner:
         try:
             data = json.loads(file.read_text())
             logger.debug(f"Processing IPC file: {file.name}, type: {data.get('type')}")
+            #await asyncio.sleep(10)
             
             if data.get('type') == 'message':
                 await self._handle_message(data)

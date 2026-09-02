@@ -603,9 +603,13 @@ class NanoClawApplication:
                                     self.last_agent_timestamp[chat_id] = group_msgs[-1].timestamp
                                     continue
                             
+                            group_atts = []
+                            for msg in group_msgs:
+                                if msg.attachments:
+                                    group_atts.extend(msg.attachments)
                            
                             formatted = self.message_formatter.format_messages(group_msgs)
-                            if self.queue.send_message(chat_id, formatted):
+                            if self.queue.send_message(chat_id, formatted, attachments=group_atts):
                                 self.last_agent_timestamp[chat_id] = group_msgs[-1].timestamp
                                 self.save_state()
                                 logger.info(f'Updated cursor for {chat_id} to {group_msgs[-1].timestamp}')
