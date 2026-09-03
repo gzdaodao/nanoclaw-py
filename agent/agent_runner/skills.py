@@ -19,7 +19,7 @@ class Skill:
     name: str
     description: str
     path: Path  # 技能目录路径
-    readme: str = ""  # skill.md 内容，懒加载
+    readme: str = ""  # SKILL.md 内容，懒加载
 
 
 class SkillLoader:
@@ -88,7 +88,7 @@ class SkillLoader:
         Args:
             name: 技能名称
             description: 技能简短描述
-            content: 技能详细内容 (skill.md)
+            content: 技能详细内容 (SKILL.md)
             
         Returns:
             创建成功的技能信息字典，失败返回 None
@@ -135,12 +135,12 @@ class SkillLoader:
                 pass
             return None
         
-        # 写入 skill.md
-        readme_file = skill_dir / "skill.md"
+        # 写入 SKILL.md
+        readme_file = skill_dir / "SKILL.md"
         try:
             readme_file.write_text(content, encoding='utf-8')
         except Exception as e:
-            logger.error(f"Failed to write skill.md: {e}")
+            logger.error(f"Failed to write SKILL.md: {e}")
             # 清理已创建的文件和目录
             try:
                 index_file.unlink()
@@ -248,12 +248,12 @@ class SkillLoader:
         if skill.readme:
             return skill.readme
         
-        readme_path = skill.path / "skill.md"
+        readme_path = skill.path / "SKILL.md"
         if readme_path.exists():
             try:
                 skill.readme = readme_path.read_text(encoding='utf-8')
             except Exception as e:
-                logger.error(f"Failed to read skill.md for {skill.name}: {e}")
+                logger.error(f"Failed to read SKILL.md for {skill.name}: {e}")
                 skill.readme = ""
         else:
             skill.readme = ""
@@ -377,7 +377,7 @@ def create_skill(name: str, description: str, content: str) -> Optional[Dict]:
     Args:
         name: 技能名称
         description: 技能简短描述
-        content: 技能详细内容 (skill.md)
+        content: 技能详细内容 (SKILL.md)
         
     Returns:
         创建成功的技能信息字典，失败返回 None
