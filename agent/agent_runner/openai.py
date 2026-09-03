@@ -209,10 +209,30 @@ class OpenAIAgent(Agent):
             except Exception as e:
                 logger.error(f"Failed to load plugin {module_name}: {e}")
     
+    def _get_ai_soul(self) -> str:
+        soul = ''
+
+        group_soul = self.context.workspace_dir or Path('/workspace/group') / 'SOUL.md'
+        global_soul = Path('/workspace/global') / 'SOUL.md'
+        if group_soul.exists():
+            soul = group_soul.read_text()
+        elif global_soul.exists():
+            soul = global_soul.read_text()
+        
+
+        return soul
+
+
     def _build_system_prompt(self) -> str:
         """Build system prompt with skill information"""
+        prompt = f"""You are {self.context.assistant_name}, an AI assistant with access to various skills and tools.
+"""
         if self.custom_system_prompt:
-            return self.custom_system_prompt
+            prompt = self.custom_system_prompt
+
+        # Add SOUL
+        soul = self._get_ai_soul()
+        prompt += soul
         
         # Get skills summary
         skills_summary = get_skills_summary()
@@ -221,8 +241,7 @@ class OpenAIAgent(Agent):
         mcp_servers_summary = get_mcp_servers_summary()
         
         # Build prompt
-        prompt = f"""You are {self.context.assistant_name}, an AI assistant with access to various skills and tools.
-You are in group: {self.context.group_folder}
+        prompt += f"""You are in group: {self.context.group_folder}
 Main group: {self.context.is_main}
 
 {skills_summary}
