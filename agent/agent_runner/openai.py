@@ -212,7 +212,7 @@ class OpenAIAgent(Agent):
     def _get_ai_soul(self) -> str:
         soul = ''
 
-        group_soul = self.context.workspace_dir or Path('/workspace/group') / 'SOUL.md'
+        group_soul = (self.context.workspace_dir or Path('/workspace/group')) / 'SOUL.md'
         global_soul = Path('/workspace/global') / 'SOUL.md'
         if group_soul.exists():
             soul = group_soul.read_text()
