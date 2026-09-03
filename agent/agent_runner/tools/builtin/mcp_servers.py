@@ -39,7 +39,7 @@ class GetMcpServerDetailTool(BaseTool):
             
             # 确保MCP服务已加载
             if not loader._loaded:
-                loader.load_all_mcp_servers()
+                await loader.load_all_mcp_servers()
             
             mcp_server_detail = loader.get_mcp_server_detail(identifier)
             
@@ -81,7 +81,7 @@ class SearchMcpServersTool(BaseTool):
             
             # 确保MCP服务已加载
             if not loader._loaded:
-                loader.load_all_mcp_servers()
+                await loader.load_all_mcp_servers()
             
             results = loader.search_mcp_servers(query)
             
@@ -124,7 +124,7 @@ class ListMcpServersTool(BaseTool):
             
             # 确保MCP服务已加载
             if not loader._loaded:
-                loader.load_all_mcp_servers()
+                await loader.load_all_mcp_servers()
             
             mcp_servers = loader.get_all_mcp_servers()
             
@@ -239,7 +239,7 @@ class CreateMcpServerTool(BaseTool):
             
             # 确保MCP服务已加载
             if not loader._loaded:
-                loader.load_all_mcp_servers()
+                await loader.load_all_mcp_servers()
             
             # 检查名称是否已存在
             existing = loader.get_mcp_server(name)
@@ -301,7 +301,7 @@ class DeleteMcpServerTool(BaseTool):
             
             # 确保MCP服务已加载
             if not loader._loaded:
-                loader.load_all_mcp_servers()
+                await loader.load_all_mcp_servers()
             
             # 调用封装好的删除方法
             result = delete_mcp_server(identifier.strip())
@@ -350,7 +350,7 @@ class LoadMcpServersTool(BaseTool):
             
             # 确保MCP服务已加载
             if not loader._loaded:
-                loader.load_all_mcp_servers()
+                await loader.load_all_mcp_servers()
             
             mcp_server = loader.get_mcp_server(identifier)
             agent = self.context.agent
@@ -416,7 +416,7 @@ class McpServersPlugin(ToolPlugin):
         # 预加载MCP服务
         try:
             from agent_runner.mcp_servers import load_all_mcp_servers
-            count = load_all_mcp_servers()
+            count = await load_all_mcp_servers()
             logger.info(f"McpServers plugin initialized with {count} mcp_servers loaded")
         except Exception as e:
             logger.warning(f"Failed to pre-load mcp_servers: {e}")
