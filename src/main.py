@@ -593,11 +593,15 @@ class NanoClawApplication:
                             
                             is_main_group = group.folder == MAIN_GROUP_FOLDER
                             needs_trigger = not is_main_group and group.requiresTrigger is not False
+                            is_system_message = any(
+                                msg.sender_id == 'system' for msg in group_msgs
+                            )
+ 
                             
-                            if needs_trigger:
+                            if needs_trigger and not is_system_message:
                                 has_trigger = any(
                                     TRIGGER_PATTERN.match(m.content.strip())
-                                    for m in group_msgs
+                                    for m in group_msgs if m.sender_id != 'system'
                                 )
                                 if not has_trigger:
                                     self.last_agent_timestamp[chat_id] = group_msgs[-1].timestamp

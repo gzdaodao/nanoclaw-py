@@ -254,11 +254,12 @@ class SchedulerLoop:
                     if not current or current.status != 'active':
                         continue
                     
-                    self.deps.queue.enqueue_task(
-                        current.chat_id,
-                        current.id,
-                        lambda t=task: self.task_runner.run_task(t)
-                    )
+                    #self.deps.queue.enqueue_task(
+                    #    current.chat_id,
+                    #    current.id,
+                    #    lambda t=task: self.task_runner.run_task(t)
+                    #)
+                    await self.task_runner.run_task(task)
                 
                 await asyncio.sleep(SCHEDULER_POLL_INTERVAL / 1000)
                 
